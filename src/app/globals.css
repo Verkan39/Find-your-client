@@ -65,11 +65,30 @@ body {
   background: color-mix(in oklab, var(--color-violet) 45%, transparent);
 }
 
+/* Glass surface with a cursor spotlight: --mx/--my are set per card by PointerFX. */
 @utility glass {
-  background: linear-gradient(180deg, rgb(255 255 255 / 0.055), rgb(255 255 255 / 0.02));
+  position: relative;
+  background:
+    radial-gradient(520px circle at var(--mx, -999px) var(--my, -999px), rgb(139 123 255 / calc(0.07 * var(--spot, 0))), transparent 45%),
+    linear-gradient(180deg, rgb(255 255 255 / 0.055), rgb(255 255 255 / 0.02));
   border: 1px solid rgb(255 255 255 / 0.08);
   backdrop-filter: blur(18px) saturate(140%);
   -webkit-backdrop-filter: blur(18px) saturate(140%);
+
+  &::after {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    padding: 1px;
+    border-radius: inherit;
+    pointer-events: none;
+    background: radial-gradient(300px circle at var(--mx, -999px) var(--my, -999px), rgb(185 175 255 / 0.55), transparent 55%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    opacity: var(--spot, 0);
+    transition: opacity 0.4s ease;
+  }
 }
 
 @utility glass-strong {
@@ -109,10 +128,38 @@ body {
   background-size: 48px 48px;
 }
 
+@utility bg-grid-bright {
+  background-image:
+    linear-gradient(rgb(160 150 255 / 0.16) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(160 150 255 / 0.16) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+/* Skeleton blocks share one fixed-position gradient, so a single wave of light
+   sweeps across every placeholder on the page in sync. */
 @utility skeleton {
-  background: linear-gradient(90deg, rgb(255 255 255 / 0.04) 25%, rgb(255 255 255 / 0.09) 50%, rgb(255 255 255 / 0.04) 75%);
-  background-size: 200% 100%;
-  animation: var(--animate-shimmer);
+  background-color: rgb(255 255 255 / 0.045);
+  background-image: linear-gradient(100deg, transparent 35%, rgb(170 160 255 / 0.09) 50%, transparent 65%);
+  background-size: 200vw 100%;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  animation: skeleton-wave 1.9s ease-in-out infinite;
+}
+
+@keyframes skeleton-wave {
+  from { background-position: -120vw 0; }
+  to { background-position: 120vw 0; }
+}
+
+/* Delay skeletons slightly so near-instant loads don't flash. */
+@utility skeleton-enter {
+  animation: skeleton-enter 0.35s ease-out 0.12s both;
+}
+
+@keyframes skeleton-enter {
+  /* opacity only: a transform here would break the fixed-attachment sweep */
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .noise::after {

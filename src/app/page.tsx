@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { motion, useScroll, useTransform } from "framer-motion";
+import { motion, useMotionTemplate, useMotionValue, useScroll, useSpring, useTransform } from "framer-motion";
 import {
   ArrowRight, Bot, Building2, CheckCircle2, Globe2, Mail, MapPinned, Radar, Search, Sparkles, Target, TrendingUp, Users,
 } from "lucide-react";
 import { useRef } from "react";
 import { HeroScene } from "@/components/three";
+import { Magnetic } from "@/components/PointerFX";
 import { Reveal, TiltCard } from "@/components/ui";
 import { CATEGORIES } from "@/lib/categories";
 
@@ -24,26 +25,47 @@ export default function Home() {
   const sceneOpacity = useTransform(scrollYProgress, [0, 0.9], [1, 0]);
   const textY = useTransform(scrollYProgress, [0, 1], ["0%", "60%"]);
 
+  // Pointer position inside the hero: pixels for the grid spotlight, -1..1 for parallax.
+  const px = useMotionValue(-500);
+  const py = useMotionValue(-500);
+  const nx = useSpring(0, { stiffness: 60, damping: 18 });
+  const ny = useSpring(0, { stiffness: 60, damping: 18 });
+  const gridMask = useMotionTemplate`radial-gradient(260px circle at ${px}px ${py}px, black, transparent 75%)`;
+  const textX = useTransform(nx, (v) => v * -14);
+  const textTilt = useTransform(ny, (v) => v * -8);
+  const copyX = useTransform(nx, (v) => v * -8);
+  const chipsX = useTransform(nx, (v) => v * 22);
+  const chipsY = useTransform(ny, (v) => v * 16);
+  const onHeroMove = (e: React.PointerEvent<HTMLElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    px.set(e.clientX - r.left);
+    py.set(e.clientY - r.top);
+    nx.set(((e.clientX - r.left) / r.width) * 2 - 1);
+    ny.set(((e.clientY - r.top) / r.height) * 2 - 1);
+  };
+
   return (
     <main className="relative">
       {/* ------------------------------ hero ------------------------------ */}
-      <section ref={hero} className="relative min-h-[100svh] overflow-hidden">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_70%_40%,rgba(111,92,255,0.22),transparent_55%),radial-gradient(ellipse_at_20%_80%,rgba(63,215,242,0.10),transparent_50%)]" />
-        <div className="pointer-events-none absolute inset-0 bg-grid [mask-image:radial-gradient(ellipse_at_center,black_20%,transparent_70%)]" />
+      <section ref={hero} onPointerMove={onHeroMove} className="relative min-h-[100svh] overflow-hidden">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_70%_40%,rgba(111,92,255,0.14),transparent_55%),radial-gradient(ellipse_at_20%_80%,rgba(63,215,242,0.06),transparent_50%)]" />
+        <div className="pointer-events-none absolute inset-0 bg-grid opacity-60 [mask-image:radial-gradient(ellipse_at_center,black_20%,transparent_70%)]" />
+        {/* brighter grid revealed under the cursor */}
+        <motion.div aria-hidden className="pointer-events-none absolute inset-0 bg-grid-bright" style={{ maskImage: gridMask, WebkitMaskImage: gridMask }} />
         <motion.div style={{ y: sceneY, opacity: sceneOpacity }} className="absolute inset-0 lg:left-[30%]">
-          <HeroScene />
+          <HeroScene container={hero} />
         </motion.div>
 
-        <motion.div style={{ y: textY }} className="relative z-10 mx-auto flex min-h-[100svh] max-w-7xl flex-col justify-center px-4 pt-24 pb-16 sm:px-6">
+        <motion.div style={{ y: textY }} className="pointer-events-none relative z-10 mx-auto flex min-h-[100svh] max-w-7xl flex-col justify-center px-4 pt-24 pb-16 sm:px-6">
           <motion.div
             initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}
-            className="mb-6 inline-flex w-fit items-center gap-2 rounded-full glass px-3 py-1.5 text-xs text-fg-muted"
+            className="pointer-events-auto mb-6 inline-flex w-fit items-center gap-2 rounded-full glass px-3 py-1.5 text-xs text-fg-muted"
           >
             <span className="relative flex size-2"><span className="absolute inline-flex size-full animate-ping rounded-full bg-lime opacity-75" /><span className="relative inline-flex size-2 rounded-full bg-lime" /></span>
             Lead intelligence for freelance developers
           </motion.div>
 
-          <h1 className="max-w-3xl font-display text-5xl font-semibold leading-[0.98] tracking-[-0.035em] sm:text-7xl lg:text-[5.5rem]">
+          <motion.h1 style={{ x: textX, y: textTilt }} className="pointer-events-auto max-w-3xl font-display text-5xl font-semibold leading-[0.98] tracking-[-0.035em] sm:text-7xl lg:text-[5.5rem]">
             {["Find", "the", "businesses"].map((w, i) => (
               <motion.span key={w} className="mr-[0.25em] inline-block" initial={{ opacity: 0, y: 40, rotateX: -60 }} animate={{ opacity: 1, y: 0, rotateX: 0 }} transition={{ delay: 0.1 + i * 0.08, duration: 0.8, ease: [0.2, 0.8, 0.2, 1] }}>
                 {w}
@@ -58,26 +80,30 @@ export default function Home() {
             <motion.span className="inline-block text-gradient" initial={{ opacity: 0, y: 40, rotateX: -60 }} animate={{ opacity: 1, y: 0, rotateX: 0 }} transition={{ delay: 0.5, duration: 0.8, ease: [0.2, 0.8, 0.2, 1] }}>
               you.
             </motion.span>
-          </h1>
+          </motion.h1>
 
-          <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.75, duration: 0.8 }} className="mt-6 max-w-xl text-lg leading-relaxed text-fg-muted">
+          <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.75, duration: 0.8 }} style={{ x: copyX }} className="pointer-events-auto mt-6 max-w-xl text-lg leading-relaxed text-fg-muted">
             Scan any neighbourhood. We analyse every local business for revenue, online visibility, customers and digital gaps,
             then tell you <span className="text-fg">what to pitch, at what price, and what they'll agree to.</span>
           </motion.p>
 
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.9 }} className="mt-10 flex flex-wrap items-center gap-3">
-            <Link href="/dashboard#new-scan" className="group relative inline-flex items-center gap-2 overflow-hidden rounded-full bg-fg px-6 py-3 font-medium text-ink-950 shadow-[0_0_40px_-8px] shadow-violet transition hover:shadow-violet">
-              <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-violet/30 to-transparent transition-transform duration-700 group-hover:translate-x-full" />
-              Start scanning
-              <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
-            </Link>
-            <a href="#how" className="rounded-full px-5 py-3 text-sm text-fg-muted ring-1 ring-white/10 transition hover:bg-white/5 hover:text-fg">
-              How it works
-            </a>
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.9 }} className="pointer-events-auto mt-10 flex flex-wrap items-center gap-3">
+            <Magnetic strength={0.35}>
+              <Link href="/dashboard#new-scan" className="group relative inline-flex items-center gap-2 overflow-hidden rounded-full bg-fg px-6 py-3 font-medium text-ink-950 transition">
+                <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-violet/30 to-transparent transition-transform duration-700 group-hover:translate-x-full" />
+                Start scanning
+                <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
+              </Link>
+            </Magnetic>
+            <Magnetic strength={0.25}>
+              <a href="#how" className="inline-block rounded-full px-5 py-3 text-sm text-fg-muted ring-1 ring-white/10 transition hover:bg-white/5 hover:text-fg">
+                How it works
+              </a>
+            </Magnetic>
           </motion.div>
 
           {/* floating insight chips */}
-          <div className="pointer-events-none absolute right-6 bottom-24 hidden flex-col gap-3 xl:flex">
+          <motion.div style={{ x: chipsX, y: chipsY }} className="pointer-events-none absolute right-6 bottom-24 hidden flex-col gap-3 xl:flex">
             {[
               { icon: TrendingUp, k: "Est. revenue", v: "₹1.8Cr – ₹3.4Cr / yr", c: "text-lime", d: 1.1 },
               { icon: Globe2, k: "Digital maturity", v: "23 / 100 · no booking", c: "text-amber", d: 1.25 },
@@ -91,7 +117,7 @@ export default function Home() {
                 </div>
               </motion.div>
             ))}
-          </div>
+          </motion.div>
         </motion.div>
 
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-40 bg-gradient-to-b from-transparent to-ink-950" />
@@ -230,9 +256,11 @@ export default function Home() {
               <Sparkles className="mx-auto size-8 text-violet" />
               <h2 className="mx-auto mt-4 max-w-2xl font-display text-4xl font-semibold tracking-tight sm:text-5xl">Your next client is a few streets away.</h2>
               <p className="mx-auto mt-4 max-w-lg text-fg-muted">Run your first scan in under a minute. Works without any API keys, and gets much deeper with them.</p>
-              <Link href="/dashboard#new-scan" className="mt-8 inline-flex items-center gap-2 rounded-full bg-fg px-6 py-3 font-medium text-ink-950 transition hover:bg-white">
-                <Building2 className="size-4" /> Scan a neighbourhood
-              </Link>
+              <Magnetic className="mt-8 inline-block">
+                <Link href="/dashboard#new-scan" className="inline-flex items-center gap-2 rounded-full bg-fg px-6 py-3 font-medium text-ink-950 transition hover:bg-white">
+                  <Building2 className="size-4" /> Scan a neighbourhood
+                </Link>
+              </Magnetic>
             </div>
           </div>
         </Reveal>

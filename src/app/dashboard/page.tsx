@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertTriangle, ArrowUpRight, Bot, CheckCircle2, MapPinned, Radar, Trash2 } from "lucide-react";
 import { NewScanForm } from "@/components/NewScanForm";
+import { ScanListSkeleton, Skel } from "@/components/skeletons";
 import { Pill, Reveal, STAGE_LABEL, Spinner, TierBadge, timeAgo } from "@/components/ui";
 import type { Scan, ScanCounts, SystemStatus } from "@/lib/types";
 
@@ -39,6 +40,9 @@ export default function Dashboard() {
             <p className="text-sm font-medium tracking-wide text-violet uppercase">Dashboard</p>
             <h1 className="mt-2 font-display text-4xl font-semibold tracking-tight sm:text-5xl">Your lead radar</h1>
           </div>
+          {!status && (
+            <div className="flex gap-2"><Skel className="h-6 w-36 rounded-full" /><Skel className="h-6 w-36 rounded-full" /></div>
+          )}
           {status && (
             <div className="flex flex-wrap gap-2">
               <Pill tone={status.ai ? "good" : "warn"}>
@@ -77,7 +81,7 @@ export default function Dashboard() {
           <div>
             <h2 className="mb-4 flex items-center gap-2 font-display text-lg font-semibold"><Radar className="size-4 text-cyan" /> Scans</h2>
             {scans === null ? (
-              <div className="space-y-3">{[0, 1, 2].map((i) => <div key={i} className="skeleton h-28 rounded-2xl" />)}</div>
+              <ScanListSkeleton />
             ) : scans.length === 0 ? (
               <div className="glass grid place-items-center rounded-2xl px-6 py-16 text-center">
                 <MapPinned className="size-8 text-fg-faint" />

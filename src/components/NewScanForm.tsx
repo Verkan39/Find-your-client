@@ -7,6 +7,7 @@ import { ArrowRight, Bot, Check, Layers, MapPin, Zap } from "lucide-react";
 import clsx from "clsx";
 import { CATEGORIES, GROUPS } from "@/lib/categories";
 import type { AiMode, SystemStatus } from "@/lib/types";
+import { Magnetic } from "./PointerFX";
 import { Spinner } from "./ui";
 
 const SIZES = [10, 25, 50, 100];
@@ -165,11 +166,13 @@ export function NewScanForm({ status }: { status: SystemStatus | null }) {
         )}
       </AnimatePresence>
 
-      <button disabled={busy || query.trim().length < 2} className="group mt-7 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet to-cyan py-4 font-medium text-ink-950 shadow-[0_10px_40px_-10px] shadow-violet transition hover:brightness-110 disabled:opacity-50 sm:w-auto sm:px-8">
+      <Magnetic className="mt-7 block sm:inline-block" strength={0.2}>
+      <button disabled={busy || query.trim().length < 2} className="group inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-violet to-cyan py-4 font-medium text-ink-950 shadow-[0_10px_40px_-10px] shadow-violet transition hover:brightness-110 disabled:opacity-50 sm:w-auto sm:px-8">
         {busy ? <Spinner className="border-ink-950/20 border-t-ink-950" /> : null}
         {busy ? "Starting…" : "Launch scan"}
         {!busy && <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />}
       </button>
+      </Magnetic>
     </form>
   );
 }

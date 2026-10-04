@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, Space_Grotesk } from "next/font/google";
 import { Nav } from "@/components/Nav";
+import { PointerFX } from "@/components/PointerFX";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
@@ -16,6 +17,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`${inter.variable} ${grotesk.variable}`}>
       <body className="noise min-h-screen">
+        <PointerFX />
         <Nav />
         {children}
       </body>

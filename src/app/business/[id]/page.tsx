@@ -10,6 +10,7 @@ import {
 import clsx from "clsx";
 import { ScoreOrb } from "@/components/three";
 import { Markdown } from "@/components/Markdown";
+import { BusinessSkeleton } from "@/components/skeletons";
 import { Card, Meter, Pill, Reveal, STAGE_LABEL, Spinner, TierBadge, TiltCard } from "@/components/ui";
 import { formatMoney } from "@/lib/market";
 import type { Business, Report, Scan } from "@/lib/types";
@@ -43,14 +44,7 @@ export default function BusinessPage({ params }: { params: Promise<{ id: string 
   }
 
   if (missing) return <main className="grid min-h-screen place-items-center text-fg-muted">Business not found.</main>;
-  if (!data) {
-    return (
-      <main className="mx-auto max-w-7xl px-4 pt-28 sm:px-6">
-        <div className="skeleton h-12 w-96 rounded-xl" />
-        <div className="mt-8 grid gap-6 lg:grid-cols-3">{[0, 1, 2, 3, 4, 5].map((i) => <div key={i} className="skeleton h-48 rounded-2xl" />)}</div>
-      </main>
-    );
-  }
+  if (!data) return <BusinessSkeleton />;
 
   const { business: b, scan } = data;
   const r = b.report;

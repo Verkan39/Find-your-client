@@ -10,6 +10,7 @@ import {
 import clsx from "clsx";
 import { Constellation, type StarPoint } from "@/components/three";
 import { AnimatedNumber, Meter, Pill, Reveal, STAGE_LABEL, ScoreRing, Spinner, TierBadge, timeAgo } from "@/components/ui";
+import { ScanSkeleton, Skel } from "@/components/skeletons";
 import { GROUPS } from "@/lib/categories";
 import { formatMoney } from "@/lib/market";
 import type { ActivityEvent, Business, Report, Scan, ScanCounts } from "@/lib/types";
@@ -89,15 +90,7 @@ export default function ScanPage({ params }: { params: Promise<{ id: string }> }
     );
   }
 
-  if (!data) {
-    return (
-      <main className="mx-auto max-w-7xl px-4 pt-28 sm:px-6">
-        <div className="skeleton h-10 w-80 rounded-xl" />
-        <div className="mt-8 grid gap-4 sm:grid-cols-4">{[0, 1, 2, 3].map((i) => <div key={i} className="skeleton h-28 rounded-2xl" />)}</div>
-        <div className="skeleton mt-6 h-[420px] rounded-3xl" />
-      </main>
-    );
-  }
+  if (!data) return <ScanSkeleton />;
 
   const { scan, counts, businesses, events } = data;
   const running = !["done", "failed"].includes(scan.status);
@@ -280,7 +273,7 @@ function LeadCard({ b, currency }: { b: Lead; currency: string }) {
           </div>
           <p className="mt-0.5 truncate text-xs text-fg-faint">{b.categoryLabel}{b.address ? ` · ${b.address}` : ""}</p>
         </div>
-        {r ? <ScoreRing value={r.scores.opportunity} size={52} label="Opportunity" /> : <div className="skeleton size-[52px] rounded-full" />}
+        {r ? <ScoreRing value={r.scores.opportunity} size={52} label="Opportunity" /> : <Skel className="size-[52px] shrink-0 rounded-full" />}
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
@@ -311,7 +304,11 @@ function LeadCard({ b, currency }: { b: Lead; currency: string }) {
           )}
         </>
       ) : (
-        <div className="mt-4 space-y-2"><div className="skeleton h-3 rounded" /><div className="skeleton h-3 w-2/3 rounded" /><div className="skeleton h-10 rounded-xl" /></div>
+        <div className="mt-4">
+          <div className="grid grid-cols-2 gap-x-4">{[0, 1].map((i) => <div key={i}><Skel className="mb-2 h-3 w-20" /><Skel className="h-1.5 rounded-full" /></div>)}</div>
+          <Skel className="mt-4 h-9 rounded-xl" />
+          <Skel className="mt-2 h-12 rounded-xl" />
+        </div>
       )}
     </Link>
   );
@@ -321,7 +318,7 @@ function LeadRow({ b, currency }: { b: Lead; currency: string }) {
   const r = b.report;
   return (
     <Link href={`/business/${b.id}`} className="glass flex items-center gap-4 rounded-xl px-4 py-3 transition hover:bg-white/[0.05]">
-      {r ? <ScoreRing value={r.scores.opportunity} size={40} stroke={4} /> : <div className="skeleton size-10 rounded-full" />}
+      {r ? <ScoreRing value={r.scores.opportunity} size={40} stroke={4} /> : <Skel className="size-10 shrink-0 rounded-full" />}
       <div className="min-w-0 flex-1">
         <div className="truncate font-medium">{b.name}</div>
         <div className="truncate text-xs text-fg-faint">{b.categoryLabel}{b.address ? ` · ${b.address}` : ""}</div>

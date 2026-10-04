@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { motion, useScroll, useTransform } from "framer-motion";
 import { Radar } from "lucide-react";
 import clsx from "clsx";
+import { Magnetic } from "./PointerFX";
 
 export function Nav() {
   const path = usePathname();
@@ -50,12 +51,11 @@ export function Nav() {
               </Link>
             );
           })}
-          <Link
-            href="/dashboard#new-scan"
-            className="ml-2 hidden rounded-full bg-fg px-4 py-1.5 text-sm font-medium text-ink-950 transition hover:bg-white sm:block"
-          >
-            New scan
-          </Link>
+          <Magnetic className="ml-2 hidden sm:block" strength={0.25}>
+            <Link href="/dashboard#new-scan" className="block rounded-full bg-fg px-4 py-1.5 text-sm font-medium text-ink-950 transition hover:bg-white">
+              New scan
+            </Link>
+          </Magnetic>
         </div>
       </nav>
     </motion.header>
