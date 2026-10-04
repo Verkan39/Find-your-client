@@ -39,7 +39,7 @@ export function ScoreRing({ value, size = 56, stroke = 5, label, className }: {
   const inView = useInView(ref, { once: true });
   return (
     <div className={clsx("relative inline-grid place-items-center", className)} style={{ width: size, height: size }} aria-label={`${label ?? "Score"} ${value} out of 100`}>
-      <svg ref={ref} width={size} height={size} className="-rotate-90">
+      <svg ref={ref} width={size} height={size} className="-rotate-90 overflow-visible">
         <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgb(255 255 255 / 0.08)" strokeWidth={stroke} />
         <motion.circle
           cx={size / 2} cy={size / 2} r={r} fill="none" stroke={t.color} strokeWidth={stroke} strokeLinecap="round"

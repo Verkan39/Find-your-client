@@ -2,7 +2,6 @@
 
 import { Canvas, useFrame } from "@react-three/fiber";
 import { Float, MeshDistortMaterial, Sparkles } from "@react-three/drei";
-import { Bloom, EffectComposer } from "@react-three/postprocessing";
 import { useRef } from "react";
 import * as THREE from "three";
 
@@ -19,7 +18,7 @@ function Orb({ score }: { score: number }) {
     <Float speed={2} rotationIntensity={0.6} floatIntensity={0.8}>
       <mesh>
         <icosahedronGeometry args={[1, 16]} />
-        <MeshDistortMaterial color={c} emissive={c} emissiveIntensity={0.35} distort={0.35 + (score / 100) * 0.25} speed={2.2} roughness={0.15} metalness={0.4} />
+        <MeshDistortMaterial color={c} emissive={c} emissiveIntensity={0.2} distort={0.35 + (score / 100) * 0.25} speed={2.2} roughness={0.15} metalness={0.4} />
       </mesh>
       <mesh ref={shell} scale={1.45}>
         <icosahedronGeometry args={[1, 1]} />
@@ -37,9 +36,6 @@ export default function ScoreOrb({ score }: { score: number }) {
       <pointLight position={[3, 3, 3]} intensity={30} color="#ffffff" />
       <pointLight position={[-3, -2, 2]} intensity={20} color="#3fd7f2" />
       <Orb score={score} />
-      <EffectComposer>
-        <Bloom intensity={0.8} luminanceThreshold={0.3} mipmapBlur />
-      </EffectComposer>
     </Canvas>
   );
 }

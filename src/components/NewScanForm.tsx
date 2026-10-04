@@ -1,5 +1,6 @@
 "use client";
 
+import { api } from "@/lib/fetcher";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -13,10 +14,18 @@ import { Spinner } from "./ui";
 const SIZES = [10, 25, 50, 100];
 
 const AI_MODES: { key: AiMode; label: string; desc: string; icon: typeof Bot }[] = [
-  { key: "deep", label: "Deep research", desc: "Web research + AI brief. Slowest, most accurate. ~$0.30–0.60 per business.", icon: Bot },
-  { key: "standard", label: "AI brief", desc: "AI writes the brief from crawl + map data, no web search. ~$0.08–0.15 per business.", icon: Zap },
+  { key: "deep", label: "Deep research", desc: "Searches the web for each business, then writes the brief. Slowest, most accurate.", icon: Bot },
+  { key: "standard", label: "AI brief", desc: "AI writes the brief from the website audit and map data. No web search.", icon: Zap },
   { key: "off", label: "Engine only", desc: "Built-in scoring engine. Free and fast, but less nuanced.", icon: Layers },
 ];
+
+/** Why a mode can't be used with the user's current setup, if it can't. */
+function blocked(mode: AiMode, status: SystemStatus | null): string | null {
+  if (!status || mode === "off") return null;
+  if (!status.ai) return "Add an AI key on your Profile";
+  if (mode === "deep" && !status.research) return "Add a web search key on your Profile";
+  return null;
+}
 
 export function NewScanForm({ status }: { status: SystemStatus | null }) {
   const router = useRouter();
@@ -29,7 +38,8 @@ export function NewScanForm({ status }: { status: SystemStatus | null }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const effectiveMode: AiMode = status && !status.ai ? "off" : aiMode;
+  // Fall back to the best mode the user's setup supports.
+  const effectiveMode: AiMode = !blocked(aiMode, status) ? aiMode : !blocked("standard", status) ? "standard" : "off";
   const byGroup = useMemo(() => GROUPS.map((g) => ({ g, cats: CATEGORIES.filter((c) => c.group === g) })), []);
 
   const toggle = (key: string) =>
@@ -52,7 +62,7 @@ export function NewScanForm({ status }: { status: SystemStatus | null }) {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch("/api/scans", {
+      const res = await api("/api/scans", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query, radiusKm, categories: [...selected], maxBusinesses: max, includeChains, aiMode: effectiveMode }),
@@ -133,10 +143,14 @@ export function NewScanForm({ status }: { status: SystemStatus | null }) {
       </div>
 
       <div className="mt-7">
-        <div className="mb-3 text-sm text-fg-muted">Analysis depth</div>
+        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2 text-sm">
+          <span className="text-fg-muted">Analysis depth</span>
+          {status?.ai && <span className="text-xs text-fg-faint">AI usage is billed to your {status.ai.providerName} account</span>}
+        </div>
         <div className="grid gap-2 sm:grid-cols-3">
           {AI_MODES.map((m) => {
-            const disabled = m.key !== "off" && status !== null && !status.ai;
+            const reason = blocked(m.key, status);
+            const disabled = Boolean(reason);
             const on = effectiveMode === m.key;
             return (
               <button
@@ -146,7 +160,7 @@ export function NewScanForm({ status }: { status: SystemStatus | null }) {
                 <m.icon className={clsx("size-4", on ? "text-violet" : "text-fg-muted")} />
                 <div className="mt-2 text-sm font-medium">{m.label}</div>
                 <div className="mt-1 text-xs leading-relaxed text-fg-muted">{m.desc}</div>
-                {disabled && <div className="mt-2 text-[11px] text-amber">Needs ANTHROPIC_API_KEY</div>}
+                {reason && <div className="mt-2 text-[11px] text-amber">{reason}</div>}
               </button>
             );
           })}

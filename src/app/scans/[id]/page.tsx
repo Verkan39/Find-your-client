@@ -1,5 +1,6 @@
 "use client";
 
+import { api } from "@/lib/fetcher";
 import Link from "next/link";
 import { use, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -42,7 +43,7 @@ export default function ScanPage({ params }: { params: Promise<{ id: string }> }
     let alive = true;
     let timer: ReturnType<typeof setTimeout>;
     const load = async () => {
-      const res = await fetch(`/api/scans/${id}`);
+      const res = await api(`/api/scans/${id}`);
       if (res.status === 404) { setMissing(true); return; }
       const d = (await res.json()) as ScanData;
       if (!alive) return;
@@ -130,7 +131,7 @@ export default function ScanPage({ params }: { params: Promise<{ id: string }> }
         <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-rose/10 p-4 text-sm text-rose ring-1 ring-rose/25">
           <span>{scan.error ?? "Scan failed."}</span>
           <button
-            onClick={async () => { await fetch(`/api/scans/${id}`, { method: "POST" }); setData({ ...data, scan: { ...scan, status: "queued", error: null } }); }}
+            onClick={async () => { await api(`/api/scans/${id}`, { method: "POST" }); setData({ ...data, scan: { ...scan, status: "queued", error: null } }); }}
             className="inline-flex items-center gap-1.5 rounded-full bg-rose/15 px-3 py-1 text-xs font-medium text-fg ring-1 ring-rose/30 hover:bg-rose/25"
           >
             <RotateCw className="size-3.5" /> Retry

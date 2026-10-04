@@ -105,7 +105,7 @@ function isPrivateIp(ip: string): boolean {
 }
 
 /** Websites come from crowd-sourced map data, so refuse anything that resolves to a private network. */
-async function assertPublic(url: URL) {
+export async function assertPublic(url: URL) {
   if (!/^https?:$/.test(url.protocol)) throw new Error("Unsupported protocol");
   const host = url.hostname.replace(/^\[|\]$/g, "");
   if (host === "localhost" || host.endsWith(".local") || host.endsWith(".internal")) throw new Error("Refusing private host");
@@ -224,6 +224,19 @@ function analyse(html: string, pageUrl: string, acc: CrawlResult, isHome: boolea
     acc.language = $("html").attr("lang") || undefined;
   }
   return $;
+}
+
+/** Plain text of one public page, for feeding search results to an AI. */
+export async function readablePage(url: string, maxChars = 4000): Promise<string> {
+  try {
+    const page = await fetchPage(url, 12_000);
+    if (page.status >= 400 || !page.html) return "";
+    const $ = cheerio.load(page.html);
+    $("script, style, noscript, svg, iframe, nav, footer, header").remove();
+    return $("body").text().replace(/\s+/g, " ").trim().slice(0, maxChars);
+  } catch {
+    return "";
+  }
 }
 
 const INTERESTING = /(about|contact|menu|service|treatment|book|appointment|pricing|price|rates|shop|product|team|doctor|courses|rooms|gallery|reservation|order)/i;

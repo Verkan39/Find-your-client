@@ -1,18 +1,17 @@
-import Anthropic from "@anthropic-ai/sdk";
-import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { CATEGORY_BY_KEY } from "./categories";
+import { readablePage } from "./crawler";
 import { mergedSocials, type AnalysisContext } from "./heuristics";
+import type { UserConfig } from "./keys";
+import { createLlm, generateJson } from "./llm";
+import { PROVIDERS } from "./providers/catalog";
+import { ProviderError } from "./providers/http";
+import { webSearch, type SearchConfig, type SearchHit } from "./search";
 import { ReportSchema, type Business, type Report, type Research } from "./types";
 
-export const MODEL = "claude-opus-5-5";
-const BETAS: Anthropic.Beta.AnthropicBeta[] = ["server-side-fallback-2026-07-01"];
-
-export const aiEnabled = () => Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
-
-let client: Anthropic | null = null;
-const anthropic = () => (client ??= new Anthropic({ maxRetries: 4 }));
-
-export class AIRefusalError extends Error {}
+/**
+ * The AI half of the pipeline, provider-agnostic: it builds the evidence and
+ * prompts, then hands them to whichever provider the user configured.
+ */
 
 /** Compact, model-friendly fact sheet of everything we already know. */
 function factSheet(b: Business, ctx: AnalysisContext, heuristic: Report) {
@@ -62,7 +61,7 @@ function factSheet(b: Business, ctx: AnalysisContext, heuristic: Report) {
           textSample: c.textSample.slice(0, 5000),
         }
       : "No website to crawl",
-    googleMaps: b.google ?? "Not available (no Google Places key configured)",
+    ratingsAndReviews: b.google ?? "Not available (no business-data provider configured)",
     nearbyCompetitorsInScan: ctx.peers.slice(0, 15),
     heuristicBaseline: {
       note: "Rule-based estimates from category baselines. Use as an anchor; override wherever your evidence says otherwise.",
@@ -70,6 +69,7 @@ function factSheet(b: Business, ctx: AnalysisContext, heuristic: Report) {
       priceTier: heuristic.profile.priceTier,
       revenue: heuristic.revenue,
       scores: heuristic.scores,
+      measuredFacts: heuristic.keyInsights,
       gaps: heuristic.audit.gaps,
       candidateServices: heuristic.pitch.services.map((s) => ({ name: s.name, priceLow: s.priceLow, priceHigh: s.priceHigh, pricingModel: s.pricingModel })),
     },
@@ -78,7 +78,7 @@ function factSheet(b: Business, ctx: AnalysisContext, heuristic: Report) {
 
 const RESEARCH_SYSTEM = `You are a meticulous business research analyst working for a freelance web/software developer who wants to win this local business as a client.
 
-Investigate the business using web search and web fetch. Be thorough and skeptical; it's fine to take time. Cover, where findable:
+Investigate the business using the web search tools you have. Be thorough and skeptical; it's fine to take time. Cover, where findable:
 - Identity: confirm it's the right business (name + locality). Owner/founder name, years operating, number of branches.
 - Reputation: Google/Tripadvisor/Justdial/Yelp/Practo/Zomato-style ratings, review volume, recurring praise and complaints (especially complaints software could fix: booking hassles, unanswered calls, no online menu, slow replies).
 - Social presence: Instagram/Facebook/YouTube/LinkedIn handles, approximate follower counts and posting recency if visible in results, quality of content.
@@ -95,6 +95,21 @@ Rules:
 OFFICIAL_WEBSITE: <url or none>
 INSTAGRAM: <url or none>
 FACEBOOK: <url or none>`;
+
+const NOTES_FORMAT = `Cover, where the evidence allows: identity (owner, years operating, branches), reputation (ratings, review themes, complaints software could fix), social presence (handles, follower counts, posting recency), commerce (prices, delivery/booking platforms and commissions), size signals, 2-4 competitors, and anything recent.
+
+Rules:
+- Use only the evidence provided. Do not invent facts; mark inferences as (inferred) and say when something wasn't found.
+- Write research notes in markdown grouped under those headings, each fact followed by its source URL in parentheses. End with a short "Implications for a freelance pitch" section.
+- After the notes, output exactly these three lines (use "none" when not confidently found):
+OFFICIAL_WEBSITE: <url or none>
+INSTAGRAM: <url or none>
+FACEBOOK: <url or none>`;
+
+/** Used when the AI provider can't search by itself: we search, it analyses. */
+const EVIDENCE_RESEARCH_SYSTEM = `You are a meticulous business research analyst working for a freelance web/software developer who wants to win this local business as a client. You are given search results and page extracts gathered for you.
+
+${NOTES_FORMAT}`;
 
 const LINK_LINE = /^(OFFICIAL_WEBSITE|INSTAGRAM|FACEBOOK):\s*(\S+)\s*$/gim;
 
@@ -122,102 +137,110 @@ Principles:
 - Outreach message: under 160 words, warm, local, no jargon, opens with a specific observation, offers a concrete next step (e.g. a 10-minute mock-up walkthrough). Use [Your name] placeholders for the sender.
 - Social channel statuses: "strong"/"active"/"weak" only with evidence; "unknown" when unverified.
 - Customer segments: 2-4 segments whose shares sum to about 100.
-- Never fabricate. If the evidence is thin, say so in reasoning and risks.`;
+- Never fabricate. If the evidence is thin, say so in reasoning and risks.
 
-function collectSources(content: Anthropic.Beta.BetaContentBlock[], into: Map<string, string>) {
-  for (const block of content) {
-    if (block.type === "web_search_tool_result" && Array.isArray(block.content)) {
-      for (const r of block.content) if (r.type === "web_search_result") into.set(r.url, r.title);
-    }
-    if (block.type === "text" && block.citations) {
-      for (const cit of block.citations) {
-        if (cit.type === "web_search_result_location") into.set(cit.url, cit.title ?? cit.url);
-      }
-    }
-  }
-}
+Brevity (the dashboard is numbers-first; people scan, they don't read):
+- verdict: max 14 words, starts with Hot/Warm/Cool lead, names the offer.
+- keyInsights: 3-5 items, most decisive first. Each leads with a hard number or value in "stat" (e.g. "4.6★", "0", "25%", "© 2019", "₹40k/mo", "12k followers"), a 2-4 word label, and a detail of at most 12 words. Prefer facts from research (follower counts, commission paid, review themes) over generic ones; measuredFacts in the baseline are verified and can be reused.
+- Every other free-text field: one or two short sentences, max 25 words. Talking points max 18 words each. No filler, no hedging adverbs.`;
 
-function checkRefusal(msg: { stop_reason: string | null; stop_details?: { category?: string | null; explanation?: string | null } | null }) {
-  if (msg.stop_reason === "refusal") {
-    throw new AIRefusalError(`Model declined (${msg.stop_details?.category ?? "unspecified"})`);
-  }
-}
+const researchPrompt = (facts: ReturnType<typeof factSheet>) =>
+  `Research this business in depth.\n\n<known_facts>\n${JSON.stringify(facts.business, null, 1)}\n</known_facts>\n\n<website_crawl>\n${JSON.stringify(facts.websiteCrawl, null, 1)}\n</website_crawl>\n\n<ratings_and_reviews>\n${JSON.stringify(facts.ratingsAndReviews, null, 1)}\n</ratings_and_reviews>`;
 
-/** Stage 1: open-ended web research with server-side search + fetch. */
-export async function research(b: Business, ctx: AnalysisContext, heuristic: Report): Promise<Research> {
+const finish = (raw: { text: string; sources: { title: string; url: string }[]; searches: number }): Research => {
+  const { notes, found } = extractLinks(raw.text);
+  return { notes: notes || "No research notes were produced.", sources: raw.sources.slice(0, 25), searches: raw.searches, found };
+};
+
+/**
+ * Stage 1: web research. Uses the provider's own search tool when it has one;
+ * otherwise (or if that fails and a search key exists) we run the searches and
+ * the model analyses the results. Returns null when research can't run.
+ */
+export async function research(
+  b: Business, ctx: AnalysisContext, heuristic: Report, cfg: UserConfig, note: (msg: string) => void = () => {},
+): Promise<Research | null> {
+  if (!cfg.llm || !cfg.research) return null;
+  const llm = createLlm(cfg.llm);
   const facts = factSheet(b, ctx, heuristic);
-  const messages: Anthropic.Beta.BetaMessageParam[] = [
-    {
-      role: "user",
-      content: `Research this business in depth.\n\n<known_facts>\n${JSON.stringify(facts.business, null, 1)}\n</known_facts>\n\n<website_crawl>\n${JSON.stringify(facts.websiteCrawl, null, 1)}\n</website_crawl>\n\n<google_maps>\n${JSON.stringify(facts.googleMaps, null, 1)}\n</google_maps>`,
-    },
-  ];
-  const sources = new Map<string, string>();
-  let searches = 0;
-  let notes = "";
 
-  for (let turn = 0; turn < 5; turn++) {
-    const msg = await anthropic()
-      .beta.messages.stream({
-        model: MODEL,
-        max_tokens: 64000,
-        betas: BETAS,
-        fallbacks: "default",
-        thinking: { type: "adaptive" },
-        output_config: { effort: "high" },
-        system: RESEARCH_SYSTEM,
-        tools: [
-          { type: "web_search_20260209", name: "web_search", max_uses: 10 },
-          { type: "web_fetch_20260209", name: "web_fetch", max_uses: 8, max_content_tokens: 12000 },
-        ],
-        messages,
-      })
-      .finalMessage();
-    checkRefusal(msg);
-    collectSources(msg.content, sources);
-    searches += msg.content.filter((c) => c.type === "server_tool_use").length;
-    notes = msg.content.filter((c) => c.type === "text").map((c) => (c as Anthropic.Beta.BetaTextBlock).text).join("\n").trim() || notes;
-    if (msg.stop_reason !== "pause_turn") break;
-    // Server-side tool loop hit its iteration cap: send the partial turn back and it resumes.
-    messages.push({ role: "assistant", content: msg.content });
+  if (cfg.research === "native" && llm.research) {
+    try {
+      return finish(await llm.research({ system: RESEARCH_SYSTEM, user: researchPrompt(facts) }));
+    } catch (e) {
+      if (e instanceof ProviderError && e.isAuth) throw e;
+      if (!cfg.researchFallback || !cfg.search) throw e;
+      note(`${PROVIDERS[cfg.llm.provider].name} web search failed (${e instanceof Error ? e.message : e}); using ${PROVIDERS[cfg.search.provider].name} instead`);
+    }
+  }
+  if (!cfg.search) return null;
+  return finish(await searchThenAnalyse(b, ctx, facts, cfg.search, (args) => llm.complete(args)));
+}
+
+/** Generic research: run targeted searches, read the best pages, let the model write notes. */
+async function searchThenAnalyse(
+  b: Business, ctx: AnalysisContext, facts: ReturnType<typeof factSheet>, search: SearchConfig,
+  complete: (args: { system: string; messages: { role: "user"; content: string }[]; maxTokens: number }) => Promise<{ text: string }>,
+) {
+  const cat = CATEGORY_BY_KEY[b.category];
+  const where = ctx.region;
+  const queries = [
+    `"${b.name}" ${where}`,
+    `"${b.name}" ${where} reviews`,
+    `"${b.name}" instagram OR facebook`,
+    `"${b.name}" owner OR founder OR "established"`,
+    `best ${cat.label.toLowerCase()} in ${where}`,
+  ];
+  const results = await Promise.allSettled(queries.map((q) => webSearch(search, q, 6)));
+  const hits = new Map<string, SearchHit & { query: string }>();
+  results.forEach((r, i) => {
+    if (r.status === "fulfilled") for (const h of r.value) if (!hits.has(h.url)) hits.set(h.url, { ...h, query: queries[i] });
+  });
+  if (!hits.size) {
+    const err = results.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined;
+    if (err) throw err.reason;
   }
 
-  const { notes: clean, found } = extractLinks(notes);
-  return {
-    notes: clean || "No research notes were produced.",
-    sources: [...sources.entries()].slice(0, 25).map(([url, title]) => ({ url, title })),
-    searches,
-    found,
-  };
+  // Read the few pages most likely to be about this business (skip social sites, which block bots).
+  const nameBit = b.name.toLowerCase().split(/\s+/)[0];
+  const readable = [...hits.values()]
+    .filter((h) => !/(instagram|facebook|tiktok|x\.com|twitter|linkedin)\./i.test(h.url))
+    .sort((a, c) => Number(c.title.toLowerCase().includes(nameBit)) - Number(a.title.toLowerCase().includes(nameBit)))
+    .slice(0, 3);
+  const pages = await Promise.all(readable.map(async (h) => ({ url: h.url, text: await readablePage(h.url, 3500) })));
+
+  const evidence = [
+    "<search_results>",
+    ...[...hits.values()].slice(0, 24).map((h) => `- [${h.query}] ${h.title} (${h.url}): ${h.snippet.slice(0, 300)}`),
+    "</search_results>",
+    ...pages.filter((p) => p.text).map((p) => `<page url="${p.url}">\n${p.text}\n</page>`),
+  ].join("\n");
+
+  const { text } = await complete({
+    system: EVIDENCE_RESEARCH_SYSTEM,
+    messages: [{ role: "user", content: `${researchPrompt(facts)}\n\n<evidence>\n${evidence}\n</evidence>` }],
+    maxTokens: 8000,
+  });
+  return { text, sources: [...hits.values()].map((h) => ({ title: h.title, url: h.url })), searches: queries.length };
 }
 
 /** Stage 2: synthesise everything into the structured report. */
-export async function writeReport(b: Business, ctx: AnalysisContext, heuristic: Report, res: Research | null): Promise<Report> {
+export async function writeReport(b: Business, ctx: AnalysisContext, heuristic: Report, res: Research | null, cfg: UserConfig): Promise<Report> {
+  if (!cfg.llm) throw new Error("No AI provider configured");
+  const llm = createLlm(cfg.llm);
   const facts = factSheet(b, ctx, heuristic);
-  const msg = await anthropic()
-    .beta.messages.stream({
-      model: MODEL,
-      max_tokens: 64000,
-      betas: BETAS,
-      fallbacks: "default",
-      thinking: { type: "adaptive" },
-      output_config: { effort: "high", format: betaZodOutputFormat(ReportSchema) },
-      system: REPORT_SYSTEM,
-      messages: [
-        {
-          role: "user",
-          content: `Write the client-acquisition brief for this business.\n\n<facts>\n${JSON.stringify(facts, null, 1)}\n</facts>\n\n<web_research>\n${res ? res.notes : "Web research was not run for this business; rely on the facts above and say where evidence is thin."}\n</web_research>`,
-        },
-      ],
-    })
-    .finalMessage();
-  checkRefusal(msg);
-  if (msg.stop_reason === "max_tokens") throw new Error("Report generation hit the output limit");
-  const parsed = msg.parsed_output;
-  if (!parsed) throw new Error("Model returned a report that didn't match the schema");
-  // The schema can't express integer ranges, so normalise scores here.
-  const pct = (n: number) => Math.round(Math.max(0, Math.min(100, n)));
+  const parsed = await generateJson(llm, {
+    name: "report",
+    schema: ReportSchema,
+    system: REPORT_SYSTEM,
+    user: `Write the client-acquisition brief for this business.\n\n<facts>\n${JSON.stringify(facts, null, 1)}\n</facts>\n\n<web_research>\n${res ? res.notes : "Web research was not run for this business; rely on the facts above and say where evidence is thin."}\n</web_research>`,
+  });
+  // Schemas can't express integer ranges, so normalise scores here.
+  const pct = (n: number) => Math.round(Math.max(0, Math.min(100, Number(n) || 0)));
   const scores = Object.fromEntries(Object.entries(parsed.scores).map(([k, v]) => [k, pct(v)])) as Report["scores"];
   const services = parsed.pitch.services.map((s) => ({ ...s, acceptanceProbability: pct(s.acceptanceProbability) }));
-  return { ...parsed, scores, pitch: { ...parsed.pitch, services }, source: "ai", generatedAt: Date.now(), model: msg.model };
+  return {
+    ...parsed, scores, pitch: { ...parsed.pitch, services },
+    source: "ai", generatedAt: Date.now(), model: `${PROVIDERS[cfg.llm.provider].name} · ${cfg.llm.model}`,
+  };
 }

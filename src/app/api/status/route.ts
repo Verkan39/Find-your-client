@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
-import { MODEL, aiEnabled } from "@/lib/ai";
-import { googleEnabled } from "@/lib/google";
-import type { SystemStatus } from "@/lib/types";
+import { authed } from "@/lib/api";
+import { capabilityStatus } from "@/lib/keys";
 
 export const dynamic = "force-dynamic";
 
-export function GET() {
-  const status: SystemStatus = { ai: aiEnabled(), google: googleEnabled(), model: MODEL };
-  return NextResponse.json(status);
+/** The signed-in user's AI / data / research setup. No secrets. */
+export async function GET() {
+  const { user, denied } = await authed();
+  if (denied) return denied;
+  return NextResponse.json(await capabilityStatus(user.id));
 }

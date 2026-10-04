@@ -1,9 +1,10 @@
 "use client";
 
+import { api } from "@/lib/fetcher";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, ArrowUpRight, Bot, CheckCircle2, MapPinned, Radar, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, CheckCircle2, KeyRound, MapPinned, Radar, Search, Trash2 } from "lucide-react";
 import { NewScanForm } from "@/components/NewScanForm";
 import { ScanListSkeleton, Skel } from "@/components/skeletons";
 import { Pill, Reveal, STAGE_LABEL, Spinner, TierBadge, timeAgo } from "@/components/ui";
@@ -18,7 +19,7 @@ export default function Dashboard() {
   useEffect(() => {
     fetch("/api/status").then((r) => r.json()).then(setStatus).catch(() => {});
     let alive = true;
-    const load = () => fetch("/api/scans").then((r) => r.json()).then((d) => alive && setScans(d)).catch(() => {});
+    const load = () => api("/api/scans").then((r) => r.json()).then((d) => alive && Array.isArray(d) && setScans(d)).catch(() => {});
     load();
     const t = setInterval(load, 4000);
     return () => { alive = false; clearInterval(t); };
@@ -26,7 +27,7 @@ export default function Dashboard() {
 
   async function remove(id: string) {
     if (!confirm("Delete this scan and all its analysis?")) return;
-    await fetch(`/api/scans/${id}`, { method: "DELETE" });
+    await api(`/api/scans/${id}`, { method: "DELETE" });
     setScans((s) => s?.filter((x) => x.id !== id) ?? null);
   }
 
@@ -47,25 +48,33 @@ export default function Dashboard() {
             <div className="flex flex-wrap gap-2">
               <Pill tone={status.ai ? "good" : "warn"}>
                 {status.ai ? <CheckCircle2 className="size-3" /> : <AlertTriangle className="size-3" />}
-                AI analysis {status.ai ? `on · ${status.model}` : "off"}
+                {status.ai ? `${status.ai.providerName} · ${status.ai.model}` : "No AI provider"}
               </Pill>
-              <Pill tone={status.google ? "good" : "default"}>
-                {status.google ? <CheckCircle2 className="size-3" /> : <MapPinned className="size-3" />}
-                Google Maps data {status.google ? "on" : "off"}
+              <Pill tone={status.research ? "good" : "default"}>
+                {status.research ? <CheckCircle2 className="size-3" /> : <Search className="size-3" />}
+                {status.research ? `Research: ${status.research.name}` : "No web research"}
+              </Pill>
+              <Pill tone={status.places ? "good" : "default"}>
+                {status.places ? <CheckCircle2 className="size-3" /> : <MapPinned className="size-3" />}
+                {status.places ? `${status.places.providerName} data` : "No ratings data"}
               </Pill>
             </div>
           )}
         </div>
       </Reveal>
 
-      {status && (!status.ai || !status.google) && (
+      {status && (!status.ai || !status.places) && (
         <Reveal delay={0.05}>
-          <div className="mt-6 flex gap-3 rounded-2xl bg-amber/[0.06] p-4 text-sm ring-1 ring-amber/20">
-            <Bot className="mt-0.5 size-4 shrink-0 text-amber" />
-            <div className="text-fg-muted">
-              {!status.ai && <p><span className="text-fg">Add <code className="rounded bg-white/10 px-1">ANTHROPIC_API_KEY</code> to <code className="rounded bg-white/10 px-1">.env.local</code></span> to unlock web research and AI-written pitches. Scans still work with the built-in engine.</p>}
-              {!status.google && <p className={status.ai ? "" : "mt-1"}>Optional: <code className="rounded bg-white/10 px-1">GOOGLE_PLACES_API_KEY</code> adds ratings, review counts and review text, which sharpens revenue and reputation estimates.</p>}
-            </div>
+          <div className="mt-6 flex flex-wrap items-center gap-3 rounded-2xl bg-amber/[0.06] p-4 text-sm ring-1 ring-amber/20">
+            <KeyRound className="size-4 shrink-0 text-amber" />
+            <p className="min-w-0 flex-1 text-fg-muted">
+              {!status.ai
+                ? <><span className="text-fg">Connect your own AI provider</span> (Claude, OpenAI, Gemini and more) to unlock web research and AI-written pitches. Until then, scans use the free built-in engine.</>
+                : <><span className="text-fg">Optional:</span> add a Google Places or Yelp key for ratings, review counts and review text. They make the revenue and reputation estimates sharper.</>}
+            </p>
+            <Link href="/profile#keys" className="shrink-0 rounded-full bg-fg px-4 py-1.5 text-xs font-medium text-ink-950 transition hover:bg-white">
+              Add API keys
+            </Link>
           </div>
         </Reveal>
       )}

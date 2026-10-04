@@ -1,96 +1,35 @@
-import { DatabaseSync } from "node:sqlite";
-import fs from "node:fs";
-import path from "node:path";
-import crypto from "node:crypto";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   ActivityEvent,
   AiMode,
   Business,
   BusinessStatus,
+  PeerStats,
   Scan,
   ScanCounts,
   ScanStatus,
 } from "./types";
 
-const DB_PATH = path.join(process.cwd(), "data", "app.db");
-
-const g = globalThis as unknown as { __fycDb?: DatabaseSync };
-
-function open(): DatabaseSync {
-  if (g.__fycDb) return g.__fycDb;
-  fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-  const db = new DatabaseSync(DB_PATH);
-  db.exec(`
-    PRAGMA journal_mode = WAL;
-    PRAGMA foreign_keys = ON;
-    CREATE TABLE IF NOT EXISTS scans (
-      id TEXT PRIMARY KEY,
-      query TEXT NOT NULL,
-      label TEXT,
-      lat REAL, lon REAL,
-      radius_m INTEGER NOT NULL,
-      country_code TEXT,
-      currency TEXT NOT NULL DEFAULT 'USD',
-      categories TEXT NOT NULL,
-      max_businesses INTEGER NOT NULL,
-      include_chains INTEGER NOT NULL DEFAULT 0,
-      ai_mode TEXT NOT NULL DEFAULT 'deep',
-      status TEXT NOT NULL,
-      error TEXT,
-      discovered INTEGER NOT NULL DEFAULT 0,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS businesses (
-      id TEXT PRIMARY KEY,
-      scan_id TEXT NOT NULL REFERENCES scans(id) ON DELETE CASCADE,
-      osm_id TEXT NOT NULL,
-      name TEXT NOT NULL,
-      category TEXT NOT NULL,
-      category_label TEXT NOT NULL,
-      grp TEXT NOT NULL,
-      lat REAL NOT NULL, lon REAL NOT NULL,
-      address TEXT, phone TEXT, website TEXT, email TEXT, opening_hours TEXT, brand TEXT,
-      tags TEXT NOT NULL,
-      socials TEXT NOT NULL,
-      crawl TEXT, google TEXT, report TEXT, research TEXT,
-      status TEXT NOT NULL,
-      error TEXT,
-      opportunity INTEGER,
-      updated_at INTEGER NOT NULL,
-      UNIQUE (scan_id, osm_id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_biz_scan ON businesses(scan_id);
-    CREATE TABLE IF NOT EXISTS events (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      scan_id TEXT NOT NULL REFERENCES scans(id) ON DELETE CASCADE,
-      business_id TEXT,
-      level TEXT NOT NULL,
-      message TEXT NOT NULL,
-      ts INTEGER NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_events_scan ON events(scan_id, id);
-  `);
-  g.__fycDb = db;
-  return db;
-}
-
-export const newId = () => crypto.randomUUID().replace(/-/g, "").slice(0, 16);
-
+/**
+ * Data access over Supabase. Every function takes the client to use:
+ *  - API routes pass the signed-in user's client, so row-level security limits
+ *    them to that user's rows;
+ *  - the background pipeline passes the admin client (see supabase/admin.ts).
+ */
+type DB = SupabaseClient;
 type Row = Record<string, unknown>;
 
-const json = <T>(v: unknown, fallback: T): T => {
-  if (typeof v !== "string" || !v) return fallback;
-  try {
-    return JSON.parse(v) as T;
-  } catch {
-    return fallback;
-  }
-};
+function check<T>(res: { data: T; error: { message: string } | null }, what: string): T {
+  if (res.error) throw new Error(`Database error while ${what}: ${res.error.message}`);
+  return res.data;
+}
+
+const ms = (v: unknown) => (typeof v === "string" ? Date.parse(v) : Number(v));
 
 function toScan(r: Row): Scan {
   return {
     id: r.id as string,
+    userId: r.user_id as string,
     query: r.query as string,
     label: (r.label as string) ?? null,
     lat: (r.lat as number) ?? null,
@@ -98,15 +37,15 @@ function toScan(r: Row): Scan {
     radiusM: r.radius_m as number,
     countryCode: (r.country_code as string) ?? null,
     currency: r.currency as string,
-    categories: json<string[]>(r.categories, []),
+    categories: (r.categories as string[]) ?? [],
     maxBusinesses: r.max_businesses as number,
     includeChains: Boolean(r.include_chains),
     aiMode: r.ai_mode as AiMode,
     status: r.status as ScanStatus,
     error: (r.error as string) ?? null,
     discovered: r.discovered as number,
-    createdAt: r.created_at as number,
-    updatedAt: r.updated_at as number,
+    createdAt: ms(r.created_at),
+    updatedAt: ms(r.updated_at),
   };
 }
 
@@ -127,57 +66,70 @@ function toBusiness(r: Row): Business {
     email: (r.email as string) ?? null,
     openingHours: (r.opening_hours as string) ?? null,
     brand: (r.brand as string) ?? null,
-    tags: json(r.tags, {}),
-    socials: json(r.socials, {}),
-    crawl: json(r.crawl, null),
-    google: json(r.google, null),
-    report: json(r.report, null),
-    research: json(r.research, null),
+    tags: (r.tags as Record<string, string>) ?? {},
+    socials: (r.socials as Business["socials"]) ?? {},
+    crawl: (r.crawl as Business["crawl"]) ?? null,
+    google: (r.google as Business["google"]) ?? null,
+    report: (r.report as Business["report"]) ?? null,
+    research: (r.research as Business["research"]) ?? null,
     status: r.status as BusinessStatus,
     error: (r.error as string) ?? null,
     opportunity: (r.opportunity as number) ?? null,
-    updatedAt: r.updated_at as number,
+    updatedAt: ms(r.updated_at),
   };
 }
 
 /* ----------------------------- scans ----------------------------- */
 
-export function createScan(input: {
+export async function createScan(db: DB, input: {
   query: string;
   radiusM: number;
   categories: string[];
   maxBusinesses: number;
   includeChains: boolean;
   aiMode: AiMode;
-}): Scan {
-  const id = newId();
-  const now = Date.now();
-  open()
-    .prepare(
-      `INSERT INTO scans (id, query, radius_m, categories, max_businesses, include_chains, ai_mode, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
-    )
-    .run(id, input.query, input.radiusM, JSON.stringify(input.categories), input.maxBusinesses, input.includeChains ? 1 : 0, input.aiMode, now, now);
-  return getScan(id)!;
+}): Promise<Scan> {
+  const data = check(
+    await db
+      .from("scans")
+      .insert({
+        query: input.query,
+        radius_m: input.radiusM,
+        categories: input.categories,
+        max_businesses: input.maxBusinesses,
+        include_chains: input.includeChains,
+        ai_mode: input.aiMode,
+      })
+      .select()
+      .single(),
+    "creating the scan",
+  );
+  return toScan(data as Row);
 }
 
-export function getScan(id: string): Scan | null {
-  const r = open().prepare(`SELECT * FROM scans WHERE id = ?`).get(id) as Row | undefined;
-  return r ? toScan(r) : null;
+export async function getScan(db: DB, id: string): Promise<Scan | null> {
+  const data = check(await db.from("scans").select().eq("id", id).maybeSingle(), "loading the scan");
+  return data ? toScan(data as Row) : null;
 }
 
-export function listScans(): (Scan & { counts: ScanCounts; topOpportunity: number | null })[] {
-  const rows = open().prepare(`SELECT * FROM scans ORDER BY created_at DESC`).all() as Row[];
+export async function listScans(db: DB): Promise<(Scan & { counts: ScanCounts; topOpportunity: number | null })[]> {
+  const rows = check(
+    await db.from("scan_overview").select().order("created_at", { ascending: false }),
+    "listing scans",
+  ) as Row[];
   return rows.map((r) => {
-    const s = toScan(r);
-    const top = open()
-      .prepare(`SELECT MAX(opportunity) AS m FROM businesses WHERE scan_id = ?`)
-      .get(s.id) as { m: number | null };
-    return { ...s, counts: scanCounts(s.id), topOpportunity: top.m };
+    const total = (r.total as number) ?? 0;
+    const done = (r.done as number) ?? 0;
+    const failed = (r.failed as number) ?? 0;
+    return {
+      ...toScan(r),
+      counts: { total, done, failed, inProgress: total - done - failed },
+      topOpportunity: (r.top_opportunity as number) ?? null,
+    };
   });
 }
 
-export function updateScan(id: string, patch: Partial<{
+export async function updateScan(db: DB, id: string, patch: Partial<{
   label: string; lat: number; lon: number; countryCode: string; currency: string;
   status: ScanStatus; error: string | null; discovered: number;
 }>) {
@@ -185,116 +137,126 @@ export function updateScan(id: string, patch: Partial<{
     label: "label", lat: "lat", lon: "lon", countryCode: "country_code", currency: "currency",
     status: "status", error: "error", discovered: "discovered",
   };
-  const keys = Object.keys(patch).filter((k) => k in map);
-  if (!keys.length) return;
-  const sets = keys.map((k) => `${map[k]} = ?`).join(", ");
-  const vals = keys.map((k) => (patch as Record<string, string | number | null>)[k]);
-  open().prepare(`UPDATE scans SET ${sets}, updated_at = ? WHERE id = ?`).run(...vals, Date.now(), id);
+  const row: Row = {};
+  for (const [k, v] of Object.entries(patch)) if (k in map) row[map[k]] = v;
+  if (!Object.keys(row).length) return;
+  check(await db.from("scans").update(row).eq("id", id), "updating the scan");
 }
 
-export function deleteScan(id: string) {
-  open().prepare(`DELETE FROM scans WHERE id = ?`).run(id);
+export async function deleteScan(db: DB, id: string) {
+  check(await db.from("scans").delete().eq("id", id), "deleting the scan");
 }
 
-export function scanCounts(scanId: string): ScanCounts {
-  const r = open()
-    .prepare(
-      `SELECT COUNT(*) AS total,
-              SUM(status = 'done') AS done,
-              SUM(status = 'failed') AS failed
-       FROM businesses WHERE scan_id = ?`,
-    )
-    .get(scanId) as { total: number; done: number | null; failed: number | null };
-  const done = r.done ?? 0;
-  const failed = r.failed ?? 0;
-  return { total: r.total, done, failed, inProgress: r.total - done - failed };
+export async function scanCounts(db: DB, scanId: string): Promise<ScanCounts> {
+  const rows = check(await db.from("businesses").select("status").eq("scan_id", scanId), "counting businesses") as { status: string }[];
+  const done = rows.filter((r) => r.status === "done").length;
+  const failed = rows.filter((r) => r.status === "failed").length;
+  return { total: rows.length, done, failed, inProgress: rows.length - done - failed };
 }
 
-export function unfinishedScans(): Scan[] {
-  return (open()
-    .prepare(`SELECT * FROM scans WHERE status NOT IN ('done', 'failed') ORDER BY created_at`)
-    .all() as Row[]).map(toScan);
+export async function unfinishedScans(db: DB): Promise<Scan[]> {
+  const rows = check(
+    await db.from("scans").select().not("status", "in", "(done,failed)").order("created_at"),
+    "loading unfinished scans",
+  ) as Row[];
+  return rows.map(toScan);
+}
+
+/** Businesses requested by the caller's scans in the last 24 hours (for the daily limit). */
+export async function businessesRequestedToday(db: DB): Promise<number> {
+  const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+  const rows = check(
+    await db.from("scans").select("max_businesses").gte("created_at", since),
+    "checking usage",
+  ) as { max_businesses: number }[];
+  return rows.reduce((s, r) => s + r.max_businesses, 0);
 }
 
 /* --------------------------- businesses -------------------------- */
 
-export function insertBusinesses(scanId: string, list: Omit<Business, "id" | "scanId" | "crawl" | "google" | "report" | "research" | "status" | "error" | "opportunity" | "updatedAt">[]) {
-  const db = open();
-  const stmt = db.prepare(
-    `INSERT OR IGNORE INTO businesses
-      (id, scan_id, osm_id, name, category, category_label, grp, lat, lon, address, phone, website, email, opening_hours, brand, tags, socials, status, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+export async function insertBusinesses(db: DB, scanId: string, list: Omit<Business, "id" | "scanId" | "crawl" | "google" | "report" | "research" | "status" | "error" | "opportunity" | "updatedAt">[]) {
+  if (!list.length) return;
+  check(
+    await db.from("businesses").upsert(
+      list.map((b) => ({
+        scan_id: scanId,
+        osm_id: b.osmId,
+        name: b.name,
+        category: b.category,
+        category_label: b.categoryLabel,
+        grp: b.group,
+        lat: b.lat,
+        lon: b.lon,
+        address: b.address,
+        phone: b.phone,
+        website: b.website,
+        email: b.email,
+        opening_hours: b.openingHours,
+        brand: b.brand,
+        tags: b.tags,
+        socials: b.socials,
+      })),
+      { onConflict: "scan_id,osm_id", ignoreDuplicates: true },
+    ),
+    "saving discovered businesses",
   );
-  const now = Date.now();
-  db.exec("BEGIN");
-  try {
-    for (const b of list) {
-      stmt.run(newId(), scanId, b.osmId, b.name, b.category, b.categoryLabel, b.group, b.lat, b.lon,
-        b.address, b.phone, b.website, b.email, b.openingHours, b.brand, JSON.stringify(b.tags), JSON.stringify(b.socials), now);
-    }
-    db.exec("COMMIT");
-  } catch (e) {
-    db.exec("ROLLBACK");
-    throw e;
-  }
 }
 
-export function getBusiness(id: string): Business | null {
-  const r = open().prepare(`SELECT * FROM businesses WHERE id = ?`).get(id) as Row | undefined;
-  return r ? toBusiness(r) : null;
+export async function getBusiness(db: DB, id: string): Promise<Business | null> {
+  const data = check(await db.from("businesses").select().eq("id", id).maybeSingle(), "loading the business");
+  return data ? toBusiness(data as Row) : null;
 }
 
-export function listBusinesses(scanId: string): Business[] {
-  return (open()
-    .prepare(`SELECT * FROM businesses WHERE scan_id = ? ORDER BY opportunity IS NULL, opportunity DESC, name`)
-    .all(scanId) as Row[]).map(toBusiness);
+export async function listBusinesses(db: DB, scanId: string): Promise<Business[]> {
+  const rows = check(
+    await db.from("businesses").select().eq("scan_id", scanId)
+      .order("opportunity", { ascending: false, nullsFirst: false }).order("name"),
+    "listing businesses",
+  ) as Row[];
+  return rows.map(toBusiness);
 }
 
-export function pendingBusinesses(scanId: string): Business[] {
-  return (open()
-    .prepare(`SELECT * FROM businesses WHERE scan_id = ? AND status NOT IN ('done', 'failed') ORDER BY rowid`)
-    .all(scanId) as Row[]).map(toBusiness);
+export async function pendingBusinesses(db: DB, scanId: string): Promise<Business[]> {
+  const rows = check(
+    await db.from("businesses").select().eq("scan_id", scanId).not("status", "in", "(done,failed)").order("created_at"),
+    "loading pending businesses",
+  ) as Row[];
+  return rows.map(toBusiness);
 }
 
-export function updateBusiness(id: string, patch: Partial<Pick<Business,
+export async function peerStats(db: DB, b: Business): Promise<PeerStats> {
+  const rows = check(
+    await db.from("businesses").select("website").eq("scan_id", b.scanId).eq("category", b.category).neq("id", b.id),
+    "loading competitors",
+  ) as { website: string | null }[];
+  return { total: rows.length, withWebsite: rows.filter((r) => r.website).length };
+}
+
+export async function updateBusiness(db: DB, id: string, patch: Partial<Pick<Business,
   "crawl" | "google" | "report" | "research" | "status" | "error" | "opportunity" | "socials" | "website" | "phone" | "email">>) {
-  const cols: Record<string, (v: unknown) => unknown> = {
-    crawl: (v) => (v == null ? null : JSON.stringify(v)),
-    google: (v) => (v == null ? null : JSON.stringify(v)),
-    report: (v) => (v == null ? null : JSON.stringify(v)),
-    research: (v) => (v == null ? null : JSON.stringify(v)),
-    socials: (v) => JSON.stringify(v ?? {}),
-    status: (v) => v,
-    error: (v) => v,
-    opportunity: (v) => v,
-    website: (v) => v,
-    phone: (v) => v,
-    email: (v) => v,
-  };
-  const keys = Object.keys(patch).filter((k) => k in cols);
-  if (!keys.length) return;
-  const sets = keys.map((k) => `${k} = ?`).join(", ");
-  const vals = keys.map((k) => cols[k]((patch as Record<string, unknown>)[k])) as (string | number | null)[];
-  open().prepare(`UPDATE businesses SET ${sets}, updated_at = ? WHERE id = ?`).run(...vals, Date.now(), id);
+  if (!Object.keys(patch).length) return;
+  check(await db.from("businesses").update(patch).eq("id", id), "updating the business");
 }
 
 /* ----------------------------- events ---------------------------- */
 
-export function logEvent(scanId: string, message: string, level: ActivityEvent["level"] = "info", businessId: string | null = null) {
-  open()
-    .prepare(`INSERT INTO events (scan_id, business_id, level, message, ts) VALUES (?, ?, ?, ?, ?)`)
-    .run(scanId, businessId, level, message, Date.now());
+export async function logEvent(db: DB, scanId: string, message: string, level: ActivityEvent["level"] = "info", businessId: string | null = null) {
+  // The activity feed is best-effort; never let it break the pipeline.
+  const { error } = await db.from("scan_events").insert({ scan_id: scanId, business_id: businessId, level, message });
+  if (error) console.warn(`[events] ${error.message}`);
 }
 
-export function recentEvents(scanId: string, limit = 40): ActivityEvent[] {
-  return (open()
-    .prepare(`SELECT * FROM events WHERE scan_id = ? ORDER BY id DESC LIMIT ?`)
-    .all(scanId, limit) as Row[]).map((r) => ({
+export async function recentEvents(db: DB, scanId: string, limit = 40): Promise<ActivityEvent[]> {
+  const rows = check(
+    await db.from("scan_events").select().eq("scan_id", scanId).order("id", { ascending: false }).limit(limit),
+    "loading activity",
+  ) as Row[];
+  return rows.map((r) => ({
     id: r.id as number,
     scanId: r.scan_id as string,
     businessId: (r.business_id as string) ?? null,
     level: r.level as ActivityEvent["level"],
     message: r.message as string,
-    ts: r.ts as number,
+    ts: ms(r.created_at),
   }));
 }

@@ -1,4 +1,6 @@
 import { CATEGORY_BY_KEY, SERVICES, type CategoryDef, type ServiceKey } from "./categories";
+import { deriveInsights, deriveVerdict } from "./insights";
+import { placesSourceName } from "./places";
 import { formatMoney, localize } from "./market";
 import type { Business, Report, Socials } from "./types";
 
@@ -67,7 +69,7 @@ function digitalMaturity(b: Business): { score: number; strengths: string[]; gap
   if (!b.website) {
     gaps.push({ issue: "No website", impact: "high", evidence: "No website listed on the map or found via search; customers who search online only see the bare map listing." });
     let s = 8;
-    if (b.google?.reviewCount) { s += 8; strengths.push(`Has a Google Maps presence (${b.google.reviewCount} reviews)`); }
+    if (b.google?.reviewCount) { s += 8; strengths.push(`Has a ${placesSourceName(b.google)} listing (${b.google.reviewCount} reviews)`); }
     const soc = Object.keys(mergedSocials(b)).length;
     if (soc) { s += Math.min(10, soc * 5); strengths.push(`Active on ${soc} social channel${soc > 1 ? "s" : ""}`); }
     return { score: clamp(s), strengths, gaps };
@@ -153,10 +155,10 @@ function socialScore(b: Business) {
   if (g?.reviewCount != null) {
     const st = g.reviewCount > 300 ? "strong" : g.reviewCount > 60 ? "active" : "weak";
     score += Math.min(35, Math.log10(g.reviewCount + 1) * 13);
-    channels.unshift({ platform: "Google Maps", status: st, detail: `${g.rating?.toFixed(1) ?? "?"}★ from ${g.reviewCount} reviews`, url: g.mapsUrl ?? null });
+    channels.unshift({ platform: g.source === "yelp" ? "Yelp" : "Google Maps", status: st, detail: `${g.rating?.toFixed(1) ?? "?"}★ from ${g.reviewCount} reviews`, url: g.mapsUrl ?? null });
   } else {
     score += 8; // they exist on OSM, likely on Google too
-    channels.unshift({ platform: "Google Maps", status: "unknown", detail: "Listed on OpenStreetMap; add a Google Places key to verify rating and review volume.", url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(b.name + " " + (b.address ?? ""))}` });
+    channels.unshift({ platform: "Google Maps", status: "unknown", detail: "Listed on OpenStreetMap; add a Google Places or Yelp key on your Profile to verify rating and review volume.", url: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(b.name + " " + (b.address ?? ""))}` });
   }
   if (b.website && b.crawl?.ok) score += 8;
   return { score: clamp(score), channels };
@@ -321,10 +323,10 @@ export function heuristicReport(b: Business, ctx: AnalysisContext): Report {
 
   const risks = [
     b.brand ? `Appears to be part of a chain (${b.brand}); marketing decisions are likely made centrally.` : null,
-    closed ? `Google lists the business as ${g?.businessStatus?.toLowerCase().replace(/_/g, " ")}.` : null,
+    closed ? `${placesSourceName(g)} lists the business as ${g?.businessStatus?.toLowerCase().replace(/_/g, " ")}.` : null,
     !reachable ? "No phone, email or social contact found — you'll need to visit in person." : null,
     size === "micro" ? "Very small operation; keep the first offer cheap and fixed-price." : null,
-    !g ? "Ratings and review volume unverified (no Google Places key), so size and revenue are lower-confidence." : null,
+    !g ? "Ratings and review volume unverified (no business-data key), so size and revenue are lower-confidence." : null,
     b.crawl?.tech.includes("Wix") || b.crawl?.tech.includes("Squarespace") ? "Uses a DIY builder — the owner (or a relative) may be emotionally attached to the current site." : null,
   ].filter(Boolean) as string[];
 
@@ -335,9 +337,11 @@ export function heuristicReport(b: Business, ctx: AnalysisContext): Report {
     opportunity >= 70 ? "This is a strong lead — prioritise it." : opportunity >= 50 ? "A solid lead worth a personalised pitch." : "A weaker lead; approach only with a low-cost offer.",
   ].join(" ");
 
-  return {
+  const report: Report = {
     source: "heuristic",
     generatedAt: Date.now(),
+    verdict: "",
+    keyInsights: [],
     summary,
     profile: {
       whatTheyDo: whatTheyDo(b, cat),
@@ -354,7 +358,7 @@ export function heuristicReport(b: Business, ctx: AnalysisContext): Report {
       reasoning: `Category baseline for an independent ${cat.label.toLowerCase()}, scaled for a ${size} operation${tier !== "mid" ? ` at ${tier} pricing` : ""} and adjusted to local purchasing power${g?.reviewCount ? `; review volume (${g.reviewCount}) is used as a proxy for footfall` : ""}.`,
       drivers: [
         `Category: ${cat.label}`,
-        `Size signal: ${size}${g?.reviewCount ? ` (${g.reviewCount} Google reviews)` : b.brand ? " (chain)" : ""}`,
+        `Size signal: ${size}${g?.reviewCount ? ` (${g.reviewCount} ${placesSourceName(g)} reviews)` : b.brand ? " (chain)" : ""}`,
         `Price tier: ${tier}`,
         `Market: ${(ctx.countryCode ?? "unknown").toUpperCase()}`,
       ],
@@ -399,6 +403,9 @@ export function heuristicReport(b: Business, ctx: AnalysisContext): Report {
     },
     risks,
   };
+  report.keyInsights = deriveInsights(b, report, { total: ctx.peers.length, withWebsite: peersWithSite.length });
+  report.verdict = deriveVerdict(report);
+  return report;
 }
 
 function whatTheyDo(b: Business, cat: CategoryDef) {
@@ -417,7 +424,7 @@ function whyFor(k: ServiceKey, b: Business, cat: CategoryDef): string {
     case "localSeo": return `Customers find a ${cat.label.toLowerCase()} by searching nearby; ranking in the map pack is the cheapest way to get new ones.`;
     case "social": return "Instagram/Facebook aren't linked, but they're the main discovery channel for this category.";
     case "whatsapp": return "Customers in this market already message businesses on WhatsApp; there's no WhatsApp entry point on their site.";
-    case "reviews": return b.google?.reviewCount != null ? `Only ${b.google.reviewCount} Google reviews; competitors with more recent reviews rank higher.` : "Review volume is unverified; a review engine builds social proof steadily.";
+    case "reviews": return b.google?.reviewCount != null ? `Only ${b.google.reviewCount} ${placesSourceName(b.google)} reviews; competitors with more recent reviews rank higher.` : "Review volume is unverified; a review engine builds social proof steadily.";
     case "crm": return "There's no visible loyalty or repeat-customer program; their regulars aren't being re-engaged.";
     case "listings": return "Listings live on third-party portals that charge per lead.";
     case "portal": return "Clients have to call for records, schedules and payments.";

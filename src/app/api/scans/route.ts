@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { authed } from "@/lib/api";
 import { CATEGORY_BY_KEY } from "@/lib/categories";
-import { createScan, listScans } from "@/lib/db";
+import { businessesRequestedToday, createScan, listScans } from "@/lib/db";
+import { capabilityStatus } from "@/lib/keys";
 import { enqueueScan, resumeAll } from "@/lib/pipeline";
 
 export const dynamic = "force-dynamic";
@@ -15,18 +17,45 @@ const Body = z.object({
   aiMode: z.enum(["deep", "standard", "off"]).default("deep"),
 });
 
-export function GET() {
+const dailyLimit = () => Math.max(1, Number(process.env.DAILY_BUSINESS_LIMIT) || 150);
+
+export async function GET() {
+  const { supabase, denied } = await authed();
+  if (denied) return denied;
   resumeAll();
-  return NextResponse.json(listScans());
+  return NextResponse.json(await listScans(supabase));
 }
 
 export async function POST(req: Request) {
+  const { supabase, user, denied } = await authed();
+  if (denied) return denied;
+
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") }, { status: 400 });
   }
   const b = parsed.data;
-  const scan = createScan({
+
+  // AI work runs on the user's own keys, so check they've set them up.
+  const caps = await capabilityStatus(user.id);
+  if (b.aiMode !== "off" && !caps.ai) {
+    return NextResponse.json({ error: "Add an AI provider key on your Profile page to use AI analysis, or choose Engine only." }, { status: 400 });
+  }
+  if (b.aiMode === "deep" && !caps.research) {
+    return NextResponse.json({ error: "Deep research needs web search: pick an AI provider with built-in search, or add a Tavily, Brave or Serper key on your Profile page." }, { status: 400 });
+  }
+
+  const used = await businessesRequestedToday(supabase);
+  const limit = dailyLimit();
+  if (used + b.maxBusinesses > limit) {
+    const left = Math.max(0, limit - used);
+    return NextResponse.json(
+      { error: left ? `Daily limit: you can analyse ${left} more business${left === 1 ? "" : "es"} today. Lower the count or try tomorrow.` : "You've reached today's analysis limit. Try again tomorrow." },
+      { status: 429 },
+    );
+  }
+
+  const scan = await createScan(supabase, {
     query: b.query,
     radiusM: Math.round(b.radiusKm * 1000),
     categories: b.categories.filter((c) => CATEGORY_BY_KEY[c]),

@@ -14,6 +14,7 @@ export type BusinessStatus =
 
 export interface Scan {
   id: string;
+  userId: string;
   query: string;
   label: string | null;
   lat: number | null;
@@ -84,7 +85,10 @@ export interface CrawlResult {
   pageHeadings: string[];
 }
 
+/** Ratings and reviews from a business-data provider (Google Places or Yelp). */
 export interface GoogleData {
+  /** Which provider this came from; older rows without it are Google. */
+  source?: "google" | "yelp";
   placeId: string;
   name: string;
   rating?: number;
@@ -153,8 +157,17 @@ export interface ActivityEvent {
 
 const Score = (what = "Integer score from 0 to 100") => z.number().describe(what);
 
+export const KeyInsightSchema = z.object({
+  stat: z.string().describe("The number or value itself, as short as possible: '4.6★', '0', '25%', '© 2019', '₹40k/mo'"),
+  label: z.string().describe("What the stat measures, max 4 words"),
+  detail: z.string().describe("Why it matters for the pitch, max 12 words"),
+  tone: z.enum(["positive", "negative", "neutral"]).describe("positive = strength, negative = problem you can fix"),
+});
+
 export const ReportSchema = z.object({
-  summary: z.string().describe("3-5 sentence executive summary of the business and the opportunity for a freelance developer"),
+  verdict: z.string().describe("One punchy line, max 14 words: lead quality + what to pitch, e.g. 'Hot lead: pitch online booking, they lose after-hours customers'"),
+  keyInsights: z.array(KeyInsightSchema).describe("3-5 sharp, number-led insights, most important first"),
+  summary: z.string().describe("2-3 sentence executive summary of the business and the opportunity for a freelance developer"),
   profile: z.object({
     whatTheyDo: z.string(),
     size: z.enum(["micro", "small", "medium", "large"]),
@@ -241,14 +254,18 @@ export const ReportSchema = z.object({
   risks: z.array(z.string()),
 });
 
+export type KeyInsight = z.infer<typeof KeyInsightSchema>;
+
 export type Report = z.infer<typeof ReportSchema> & {
   source: "heuristic" | "ai";
   generatedAt: number;
   model?: string;
 };
 
-export interface SystemStatus {
-  ai: boolean;
-  google: boolean;
-  model: string;
+/** Same-category businesses in the scan, for competitive context. */
+export interface PeerStats {
+  total: number;
+  withWebsite: number;
 }
+
+export type { CapabilityStatus as SystemStatus } from "./providers/catalog";

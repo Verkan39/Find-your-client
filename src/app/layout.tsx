@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { Inter, Space_Grotesk } from "next/font/google";
-import { Nav } from "@/components/Nav";
+import { Nav, type NavUser } from "@/components/Nav";
 import { PointerFX } from "@/components/PointerFX";
+import { getUser } from "@/lib/supabase/server";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
@@ -13,12 +14,23 @@ export const metadata: Metadata = {
     "Scan any neighbourhood, analyse every local business for revenue, visibility and digital gaps, and get a pitch they'll actually say yes to.",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+async function currentUser(): Promise<NavUser | null> {
+  try {
+    const { user } = await getUser();
+    if (!user) return null;
+    return { email: user.email ?? "", name: (user.user_metadata?.full_name as string | undefined) || null };
+  } catch {
+    return null; // Supabase not configured yet; render signed-out
+  }
+}
+
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const user = await currentUser();
   return (
     <html lang="en" className={`${inter.variable} ${grotesk.variable}`}>
       <body className="noise min-h-screen">
         <PointerFX />
-        <Nav />
+        <Nav user={user} />
         {children}
       </body>
     </html>
