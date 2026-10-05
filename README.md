@@ -245,7 +245,6 @@ Scans run in the background inside the server, so the app needs an always-on hos
    - a free-plan service, kept awake by the built-in keep-alive (below), with the build and start commands
    - the `/api/health` check
    - a single instance
-   - a 120 s shutdown window for safe redeploys
 3. Fill in the secrets:
    - the three Supabase values
    - `KEYS_ENCRYPTION_SECRET`: use the same value as `.env.local`

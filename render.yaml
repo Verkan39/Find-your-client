@@ -18,9 +18,10 @@ services:
     # Heap cap only at runtime (builds get 8 GB on Render's build machines).
     startCommand: NODE_OPTIONS=--max-old-space-size=320 npm start -- -H 0.0.0.0
     healthCheckPath: /api/health
-    # Give in-flight businesses time to finish during deploys; the new server
-    # resumes anything left over (see RESUME_DELAY_MS in src/lib/pipeline.ts).
-    maxShutdownDelaySeconds: 120
+    # (maxShutdownDelaySeconds isn't allowed on the free plan. On deploys the old
+    # server stops taking new work and the new one resumes unfinished scans after
+    # RESUME_DELAY_MS, so nothing is lost. On a paid plan you can add
+    # `maxShutdownDelaySeconds: 120` here to let in-flight businesses finish.)
     autoDeployTrigger: commit
     envVars:
       # --- Supabase (Project Settings → API Keys) ---
