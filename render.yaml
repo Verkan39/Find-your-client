@@ -4,10 +4,11 @@ services:
   - type: web
     name: find-your-client
     runtime: node
-    # 0.5 CPU / 512 MB (Render's $7 "Starter"). Measured: ~160 MB idle, ~340 MB
-    # peak with two 25-business scans at once (with the settings below).
-    # Move to "1c-2g" if many people scan at the same time.
-    plan: 0.5c-512mb
+    # Free plan (512 MB). It would normally sleep after 15 idle minutes; the app
+    # pings its own /api/health every 10 minutes to stay awake (src/lib/keepalive.ts).
+    # Measured: ~160 MB idle, ~340 MB peak with two 25-business scans at once.
+    # For faster scans use "0.5c-512mb" ($7) or "1c-2g"; paid plans never sleep.
+    plan: free
     # Pick the region closest to your Supabase project (oregon, ohio, virginia,
     # frankfurt, singapore). It can't be changed after creation.
     region: singapore
@@ -47,3 +48,6 @@ services:
         value: "30"
       - key: GUEST_RETENTION_HOURS
         value: "24"
+      # Keep-alive for the free plan (uses RENDER_EXTERNAL_URL, set by Render).
+      - key: KEEP_ALIVE_INTERVAL_MIN
+        value: "10"

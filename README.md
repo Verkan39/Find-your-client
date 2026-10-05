@@ -222,6 +222,7 @@ Local Supabase extras:
 | `DAILY_BUSINESS_LIMIT` | no | Businesses per user per 24 h (default 150) |
 | `GUEST_DAILY_BUSINESS_LIMIT` / `GUEST_RETENTION_HOURS` | no | Guest allowance (default 30) and how long guest data is kept (default 24 h) |
 | `RESUME_DELAY_MS` | no | Wait before resuming scans after boot (default 45 s in production) |
+| `KEEP_ALIVE` / `KEEP_ALIVE_INTERVAL_MIN` | no | Self-ping that keeps a Render free service awake (on automatically on Render; default every 10 min). `false` disables it |
 
 AI, ratings and search keys are **not** environment variables: each user adds their own on the Profile page.
 
@@ -241,7 +242,7 @@ Scans run in the background inside the server, so the app needs an always-on hos
 
 1. Push the repo to GitHub. `.env.local` is git-ignored.
 2. In Render choose **New → Blueprint** and pick the repo. It creates:
-   - a 512 MB service with the build and start commands
+   - a free-plan service, kept awake by the built-in keep-alive (below), with the build and start commands
    - the `/api/health` check
    - a single instance
    - a 120 s shutdown window for safe redeploys
@@ -252,7 +253,12 @@ Scans run in the background inside the server, so the app needs an always-on hos
 4. In Supabase, add `https://<your-app>.onrender.com` as the Site URL and `https://<your-app>.onrender.com/**` as a Redirect URL.
 5. Open `/api/health`: it should return `{"ok":true}`.
 
-**Sizing**: measured at ~160 MB idle and ~340 MB with two 25-business scans running at once, using the settings in `render.yaml`. Builds run on Render's 8 GB build machines. Choose the region closest to your Supabase project before the first deploy. Switch to `1c-2g` if many users scan at the same time. Avoid the free plan: it sleeps when idle, which pauses scans.
+**Staying awake on the free plan.** Render puts free services to sleep after 15 minutes without incoming web requests. Work inside the server doesn't count, only real HTTP traffic does. So `src/lib/keepalive.ts` requests the app's own public `/api/health` every 10 minutes (`KEEP_ALIVE_INTERVAL_MIN`). That's comfortably inside the 15-minute window, even if a timer drifts.
+- It switches on automatically on Render, using the `RENDER_EXTERNAL_URL` that Render provides. Set `KEEP_ALIVE=false` to turn it off.
+- One always-awake service uses about 720–744 of the 750 free hours Render gives a workspace each month, so keep it your only free service.
+- For extra safety, also add a free external monitor (e.g. UptimeRobot or cron-job.org) on `/api/health`. It wakes the service if it ever does go to sleep, for example after platform maintenance.
+
+**Sizing**: measured at ~160 MB idle and ~340 MB with two 25-business scans running at once, using the settings in `render.yaml`. Builds run on Render's 8 GB build machines. The free plan has only a fraction of a CPU, so scans run slower than on paid plans; `0.5c-512mb` ($7) or `1c-2g` speeds them up and never sleeps. Choose the region closest to your Supabase project before the first deploy.
 
 ## Project structure
 
