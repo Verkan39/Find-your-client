@@ -1,177 +1,293 @@
 # Find Your Client
 
-Lead intelligence for freelance developers. Pick a neighbourhood and the app finds every independent local business in it. It then audits each one's online presence, estimates revenue, works out who their customers are, and writes a pitch: what to offer, at what price, how likely they are to say yes, and the message to send.
+**Lead intelligence for freelance developers.** Pick a neighbourhood and Find Your Client maps every independent business in it. It audits each one's website and online presence, estimates its revenue, works out who its customers are, and writes the pitch for you: what to offer, at what price, how likely they are to say yes, and the message to send.
 
-## Quick start (local)
+Next.js 16 · React 19 · React Three Fiber · Supabase (Postgres + Auth) · Claude, OpenAI, Gemini and more (bring your own key) · OpenStreetMap
+
+---
+
+## Features
+
+### 🗺️ Scan any neighbourhood
+
+Type a place ("Koramangala, Bengaluru", "Shoreditch, London"), pick a radius and categories, and launch. The app finds the businesses worth pitching and analyses up to 100 of them in depth.
+
+**How it works** (`src/lib/discovery.ts`, `src/lib/categories.ts`)
+- Nominatim geocodes the area and detects the country, which sets the currency (₹, £, $…).
+- One Overpass (OpenStreetMap) query lists named businesses across ~30 categories (restaurants, clinics, salons, gyms, law firms, real estate…), mapped from OSM tags in a category knowledge base.
+- Businesses that won't hire a freelancer are filtered out:
+  - **chain outlets**: marketing is decided at head office
+  - **institutional places**: campus canteens, government offices, university departments
+- The final pick is spread **round-robin across categories**, and favours businesses you can actually contact (phone, email, website or social).
+- Public Overpass servers are often overloaded, so the query rotates across several servers with back-off. A failed scan can be retried from its page.
+
+### 🔍 A website audit for every business
+
+Each business gets a pass/fail checklist: is the site live, secure, mobile-friendly, fast, findable on Google, tracking visitors, taking bookings or orders, and recently updated?
+
+**How it works** (`src/lib/crawler.ts`)
+- The crawler fetches the homepage plus up to 4 high-value pages (menu, booking, pricing, contact…) and parses them with cheerio.
+- It detects:
+  - HTTPS, mobile viewport, response time, title and meta description, Open Graph, schema.org types
+  - **tech stack**: WordPress, Wix, Shopify, Squarespace, Next.js…
+  - **analytics**: GA, GTM, Meta Pixel…
+  - **booking and ordering tools**: Calendly, OpenTable, Practo, Zomato…
+  - e-commerce, chat widgets, social links, emails, phone numbers and the copyright year
+- Website addresses come from crowd-sourced map data, so every URL is resolved first and **private-network addresses are refused**.
+- Errors are rewritten in plain language ("the domain no longer resolves (it may have expired)") so they can go straight into a pitch.
+
+### 📊 Revenue, scores and customer insight
+
+Every business gets an estimated annual revenue range, six 0–100 scores (opportunity, urgency, budget fit, digital maturity, visibility, reputation), a customer mix and a list of fixable gaps.
+
+**How it works** (`src/lib/heuristics.ts`, `src/lib/market.ts`, `src/lib/insights.ts`)
+- A **built-in scoring engine** runs for every business, for free, even without any API key.
+- **Revenue** = the category's baseline × size (review volume, chain status, site depth) × price tier × the country's purchasing power, converted to local currency.
+- **Opportunity** weighs how urgent the gaps are (scaled by how much the category relies on online search), whether they can pay, whether you can reach them, and their reputation. Chains are penalised.
+- **Services** come from a catalogue of 14 freelance offers (website, redesign, booking system, online ordering, local SEO, WhatsApp automation, CRM…). Each is priced for the local market. Its **acceptance probability** rises when it fixes a visible problem, costs a tiny share of the business's revenue, and is quick to deliver.
+- `insights.ts` turns all this into the short facts the UI shows: a one-line verdict, number-led key insights, and the website checklist.
+
+### 🤖 AI research and pitch writing, on your own AI account
+
+With an AI provider connected, each business gets real web research and a pitch written for that business specifically:
+- review themes and follower counts
+- delivery-app commissions
+- owner details and competitors
+
+The brief includes talking points, objection handling, the best channel and time to reach out, and a ready-to-send message.
+
+| Analysis depth | What happens |
+|---|---|
+| **Deep research** | The model searches the web for each business, then writes the brief |
+| **AI brief** | The model writes the brief from the website audit and map data (no web search) |
+| **Engine only** | The built-in engine. Free, fast, no key needed |
+
+**How it works** (`src/lib/ai.ts`, `src/lib/llm/`)
+- **Supported AI providers**: Anthropic Claude, OpenAI, Google Gemini, OpenRouter, Groq, Mistral, DeepSeek, or any OpenAI-compatible endpoint. Each user chooses one and the model.
+- **Adapted per provider and model**:
+  - **Claude** uses the official SDK with adaptive thinking, effort, native structured output and server-side web search and fetch. Options are matched to the chosen model family, with a conservative path for older models.
+  - **OpenAI** uses strict JSON-schema output and the Responses API web-search tool.
+  - **Gemini** uses JSON mode and Google Search grounding.
+  - **OpenAI-compatible providers** use JSON mode, with a fallback for models that don't support it.
+- **Research without built-in search**: the app runs targeted searches through the user's Tavily, Brave or Serper key, reads the top pages, and the model writes notes from that evidence.
+- **Every answer is validated** against one Zod report schema. If it doesn't match, the model gets one automatic repair round with the validation errors.
+- The engine's numbers go to the model as a starting point, so AI reports stay grounded.
+- If the AI fails (bad key, quota, refusal), the business keeps its engine report, and the activity feed says why ("OpenAI rejected your API key…").
+- If research turns up a website the map didn't list, that website is crawled and audited too.
+
+### ⭐ Ratings and reviews
+
+Connect **Google Places** or **Yelp Fusion** to add star ratings, review counts, price level and recent review text. These sharpen the size, revenue and reputation estimates.
+
+**How it works** (`src/lib/places.ts`)
+- Each business is matched near its map location, with a name check so Yelp's fuzzy search doesn't pick the wrong place.
+- Price tiers from both providers are mapped onto one scale.
+
+### 📋 A numbers-first business brief
+
+The business page is built to be scanned, not read:
+- **The top**: a one-line **verdict** ("Hot lead: pitch online booking, 64% likely yes") and a six-number KPI strip (revenue, deal size, win chance, digital, visibility, rating).
+- **Key insight cards**: each a big stat with a few words of context ("© 2019 · site untouched for 5 years").
+- **The pitch**: the most likely "yes" offer with a win-chance ring, plus the other offers as compact rows that expand on tap.
+- **A tabbed pitch kit**: message (with Copy), talking points, objections and approach.
+- **Business health**: the website checklist, customer mix bar, social channel tiles and a competition stat.
+- **Evidence**: research notes with sources, crawl data and reviews, collapsed until needed.
+
+### 🛰️ Live progress and a 3D lead map
+
+Scans run in the background while you watch: a progress bar, a live activity feed, and lead cards that fill in as each business is scored. A **3D constellation** plots every lead by opportunity × digital maturity × revenue: drag to orbit, hover for details, click to open.
+
+**How it works** (`src/lib/pipeline.ts`)
+- An in-process job runner analyses each scan's businesses in parallel (`ANALYSIS_CONCURRENCY`).
+- Every stage is saved to Supabase: crawling, enriching, scoring, researching, writing.
+- Pages poll for progress every 2.5 seconds.
+- If the server restarts, unfinished scans resume where they stopped.
+- **Zero-downtime deploys**: on shutdown the old server stops taking new work, and the new one waits briefly (`RESUME_DELAY_MS`) before resuming. A scan is never processed, or billed, twice.
+
+### 👤 Accounts, profiles and guest mode
+
+- **Sign up in two steps**:
+  1. The account: name, email and password, with a strength meter. A duplicate email is caught as soon as you click Continue.
+  2. An optional "About you" step: phone, role, location, experience, portfolio, skills and interests.
+- **Profile page**: edit your details and manage your API keys.
+- **Try it free**: anyone can use the app as a guest, with no signup. Guests get engine-only scans of up to 10 businesses, and their results are kept for 24 hours. Signing up keeps everything they ran.
+
+**How it works** (`src/proxy.ts`, `src/app/(auth)/`, `src/app/api/account/`)
+- **Supabase Auth** handles email and password, email confirmation, and forgot/reset password. `proxy.ts` (Next 16's request-interception file) refreshes the session on every page and protects private routes.
+- **Guests** are Supabase **anonymous users**, so every security rule applies to them unchanged.
+- **Keeping guest results**:
+  - Signing up attaches an email and password to the same user ID, so nothing has to move.
+  - Logging into an existing account moves the guest's scans there with `transfer_guest_data()`, after the server verifies the guest session.
+- **Clean-up**: an hourly job deletes guests older than `GUEST_RETENTION_HOURS`, and their scans go with them.
+
+### 🔐 Your keys and data stay private
+
+- **Row-level security on every table**: each user can only read their own scans, businesses and activity. Child rows inherit their owner from the parent scan through a trigger, so ownership can't drift.
+- **Only the server writes results.** Scans are created server-side after limits are checked (`DAILY_BUSINESS_LIMIT`, guest limits). Users can't insert or edit results directly through the Supabase API.
+- **API keys are encrypted with AES-256-GCM** before storage (`src/lib/crypto.ts`). They live in a table with no client access at all, are decrypted only in memory while a scan runs, and are never sent back to the browser, which only sees a hint like `sk-…a1b2`.
+- **Password-locked key management**: changing keys needs your password again, which unlocks key management for 15 minutes through a signed, httpOnly cookie. Wrong attempts are rate-limited.
+- **Every key is tested** against its provider before it's saved. For AI providers, the live model list comes back, so you only pick models that exist.
+
+### ✨ An interface that feels alive
+
+- **Landing page**: an interactive dotted globe. Dots swell and light up under the cursor, a click sends a ripple across it, and the globe tilts toward the pointer.
+- **Across the site**: a soft cursor light, cards that glow at their edges where you hover, buttons that pull gently toward the cursor, and parallax hero text.
+- **Loading**: layout-matched skeletons with one shared shimmer, shown instantly on navigation through `loading.tsx`.
+- **Accessibility**: motion is reduced for users who ask for it, and touch devices get the plain interface.
+
+---
+
+## Architecture
+
+```
+ Browser (React, R3F scenes, polling)
+    │  fetch /api/*  (+ Supabase session cookie)
+    ▼
+ Next.js server (Render)
+    ├─ proxy.ts ............ session refresh, route protection
+    ├─ API routes .......... auth check → read via the user's client (RLS) → enqueue work
+    └─ Pipeline worker ..... background scans (admin client)
+           ├─► Nominatim + Overpass (OpenStreetMap) ... discovery
+           ├─► business websites ...................... crawl + audit
+           ├─► Google Places / Yelp ................... ratings (user's key)
+           ├─► Claude / OpenAI / Gemini / … ........... research + brief (user's key)
+           └─► Tavily / Brave / Serper ................ web search (user's key)
+                          │
+                          ▼
+                Supabase Postgres + Auth (RLS on every table)
+```
+
+**Database** (`supabase/migrations/`):
+
+| Table / view | Holds |
+|---|---|
+| `profiles` | One row per user, created by a signup trigger |
+| `scans` | Each search |
+| `businesses` | Everything learned about each business: crawl, ratings, research, report |
+| `scan_events` | The live activity feed |
+| `user_settings` | Each user's chosen providers |
+| `api_keys` | Encrypted keys |
+| `scan_overview` | A view with per-scan counters |
+
+## Tech stack
+
+| Area | Tools |
+|---|---|
+| Framework | Next.js 16 (App Router, Turbopack), React 19, TypeScript |
+| UI | Tailwind CSS 4, Framer Motion, React Three Fiber + drei, lucide icons |
+| Data & auth | Supabase (Postgres, Auth, RLS) via `@supabase/ssr` |
+| AI | Anthropic TypeScript SDK; REST clients for OpenAI-compatible APIs and Gemini; Zod validation |
+| Data sources | OpenStreetMap (Nominatim, Overpass), cheerio, Google Places, Yelp, Tavily, Brave, Serper |
+| Hosting | Render (one long-running Node service) |
+
+---
+
+## Getting started (local)
 
 Needs Node 22+ and Docker (for the local Supabase stack).
 
 ```bash
 npm install
-npm run db:start             # starts Supabase in Docker and applies supabase/migrations
-cp .env.example .env.local   # then fill in the Supabase values printed by db:start
+npm run db:start             # Supabase in Docker; applies supabase/migrations
+cp .env.example .env.local   # fill in the values printed by db:start
 npm run dev                  # http://localhost:3000
 ```
 
-`npx supabase status` prints the local URL and keys again. The local Supabase dashboard is at http://127.0.0.1:54323, and confirmation and reset emails land in the test inbox at http://127.0.0.1:54324. Locally, email confirmation is off, so signup logs you straight in.
+Local Supabase extras:
+- `npx supabase status` prints the URL and keys again.
+- Studio, for browsing tables and users: http://127.0.0.1:54323
+- Test inbox for confirmation and reset emails: http://127.0.0.1:54324
+- Email confirmation is off locally, so signup logs you straight in.
 
-| Variable | Required | What it does |
-|---|---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | yes | Your Supabase project URL. |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | yes | Publishable key (`sb_publishable_…`). Safe in the browser, because row-level security protects the data. |
-| `SUPABASE_SECRET_KEY` | yes | Secret key (`sb_secret_…`). Server only; the worker uses it to write results and to read users' encrypted keys. |
-| `KEYS_ENCRYPTION_SECRET` | yes | Random 32+ character string that encrypts users' API keys. Generate it once (see `.env.example`). Changing it makes saved keys unreadable. |
-| `DAILY_BUSINESS_LIMIT` | no | Max businesses one user can request per 24 h (default 150). Keeps OpenStreetMap usage fair. |
-| `OSM_CONTACT_EMAIL` | no | Your contact in the OpenStreetMap User-Agent, as their usage policy asks. |
-| `ANALYSIS_CONCURRENCY` | no | How many businesses are analysed in parallel (default 3). |
-
-The app has no shared AI or Google key. Each user connects their own on the Profile page (see below).
-
-## Bring your own keys
-
-Users open **Profile → API keys & providers**, re-enter their password, and connect:
-
-| Purpose | Providers |
+| Script | Does |
 |---|---|
-| AI model (research + brief) | Anthropic Claude, OpenAI, Google Gemini, OpenRouter, Groq, Mistral, DeepSeek, any OpenAI-compatible endpoint |
-| Business data (ratings, reviews) | Google Places (New), Yelp Fusion |
-| Web search for deep research | The AI provider's own search (Claude, Gemini, OpenAI), or Tavily, Brave Search, Serper |
+| `npm run dev` / `build` / `start` | Next.js dev server / production build / production server |
+| `npm run lint` | Type-check (`tsc --noEmit`) |
+| `npm run check:setup` | Checks `.env.local` against your Supabase project: keys, tables, permissions, guest mode, encryption secret |
+| `npm run db:start` / `db:stop` | Start or stop local Supabase (data is kept) |
+| `npm run db:link` / `db:push` | Link a hosted project / apply migrations to it |
+| `npm run db:reset` | Rebuild the local database from migrations. **Wipes local data** |
 
-- **Checking keys**: every key is tested against the provider before it's saved. For AI providers, the live model list comes back so users pick a model that exists.
-- **Storage**: keys are encrypted with AES-256-GCM (`src/lib/crypto.ts`) and stored in `api_keys`. That table has RLS enabled and no policies, so only the server can read it. Users only ever see a hint like `sk-…a1b2`.
-- **Password lock**: key management requires re-entering the password. That sets a signed, httpOnly cookie that expires after 15 minutes, and repeated wrong passwords are rate-limited.
-- **How the AI layer adapts** (`src/lib/llm/`):
-  - Claude uses the official SDK with native structured output and web search, with request options matched to the chosen model.
-  - OpenAI uses strict JSON-schema output and its web search tool.
-  - Gemini uses JSON mode and Google Search grounding.
-  - OpenAI-compatible providers use JSON mode.
-  - Every provider's output is validated against the report schema, with one automatic repair round if it doesn't match.
-- **Research without built-in search**: providers that can't search by themselves get research through the user's search key. The app runs targeted searches, reads the top pages, and the model writes notes from that evidence.
+### Configuration
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | yes | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | yes | Publishable key (`sb_publishable_…`). Safe in the browser, because RLS protects the data |
+| `SUPABASE_SECRET_KEY` | yes | Secret key (`sb_secret_…`). Server only: the worker writes results and reads encrypted keys with it |
+| `KEYS_ENCRYPTION_SECRET` | yes | 32+ random characters that encrypt users' API keys. **Back it up**: changing it makes saved keys unreadable |
+| `NEXT_PUBLIC_SITE_URL` | prod | Your live URL (sent to OpenRouter as the referring site) |
+| `OSM_CONTACT_EMAIL` | recommended | Contact in the OpenStreetMap User-Agent, as their usage policy asks |
+| `ANALYSIS_CONCURRENCY` | no | Businesses analysed in parallel (default 3) |
+| `DAILY_BUSINESS_LIMIT` | no | Businesses per user per 24 h (default 150) |
+| `GUEST_DAILY_BUSINESS_LIMIT` / `GUEST_RETENTION_HOURS` | no | Guest allowance (default 30) and how long guest data is kept (default 24 h) |
+| `RESUME_DELAY_MS` | no | Wait before resuming scans after boot (default 45 s in production) |
+
+AI, ratings and search keys are **not** environment variables: each user adds their own on the Profile page.
 
 ## Hosted Supabase
 
 1. **Create a project** at https://supabase.com/dashboard.
-2. **Copy the keys** from **Project Settings → API Keys** into `.env.local`:
-   - Project URL → `NEXT_PUBLIC_SUPABASE_URL`
-   - Publishable key (`sb_publishable_…`) → `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
-   - Secret key (`sb_secret_…`) → `SUPABASE_SECRET_KEY`
-
-   Projects that only show the legacy `anon` / `service_role` keys work too: put them in `NEXT_PUBLIC_SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY`.
-3. **Create the tables**: apply everything in `supabase/migrations/`, oldest first. Either:
-   ```bash
-   npx supabase login
-   npm run db:link -- --project-ref <your-project-ref>   # ref is in the dashboard URL
-   npm run db:push
-   ```
-   or paste each `.sql` file, in filename order, into **SQL Editor** and run it.
-4. **Configure auth** under **Authentication → URL Configuration**:
-   - Site URL: `http://localhost:3000` for development, or your live domain.
-   - Redirect URLs: add `http://localhost:3000/**`, plus `https://<your-domain>/**` when you deploy.
-5. **Turn on guest mode**: in **Authentication → Sign In / Providers**, enable **Allow anonymous sign-ins**. This powers "Try it free". To keep bots from making guest accounts in bulk, also enable CAPTCHA protection under **Authentication → Attack Protection** before launch.
-6. **Recommended auth settings** under **Authentication → Sign In / Providers → Email**:
-   - Set the minimum password length to 8, to match the signup form.
-   - "Confirm email" is on by default. Supabase's built-in mailer only sends a few emails per hour, so add custom SMTP (**Authentication → Emails → SMTP**) before real users sign up. For solo testing you can turn confirmation off.
-7. **Check everything**: run `npm run check:setup`. It tests the connection, both keys, every table, the permissions and the encryption secret, and tells you what to fix. Then restart `npm run dev`.
-
-The local Docker stack (`npm run db:start`) is only for offline development. Data doesn't move between local and hosted, so the hosted project starts empty and you sign up again there.
-
-## Guest mode
-
-"Try it free" (`/try`) starts a Supabase **anonymous** session, so visitors can use the app without signing up:
-
-- **What guests can do**: engine-only scans, up to 10 businesses per scan and 30 per day (`GUEST_DAILY_BUSINESS_LIMIT`). AI analysis and API keys need an account. A floating bar reminds guests that their results are temporary.
-- **Signing up** turns the guest into a permanent account in place (same user ID), so every scan is kept. With email confirmation on, they confirm the email first and then choose a password.
-- **Logging in** to an existing account moves the guest's scans into that account. `/api/account/claim-guest` verifies the guest session, then calls `transfer_guest_data()`.
-- **Clean-up**: guests older than `GUEST_RETENTION_HOURS` (default 24) are deleted hourly by the server (`cleanup_guests()`), and their scans go with them.
+2. **Copy the keys** from **Project Settings → API Keys** into `.env.local`: the Project URL, the publishable key and the secret key. Projects that only show the legacy keys also work: use `NEXT_PUBLIC_SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY`.
+3. **Create the tables**: run `npx supabase login`, then `npm run db:link -- --project-ref <ref>`, then `npm run db:push`. Or paste each file in `supabase/migrations/` into the SQL Editor, oldest first.
+4. **Auth URLs**: under **Authentication → URL Configuration**, set the Site URL to your app's URL and add `http://localhost:3000/**` (and your live domain + `/**`) to Redirect URLs.
+5. **Guest mode**: under **Authentication → Sign In / Providers**, enable **Allow anonymous sign-ins**. Before launch, also turn on CAPTCHA under **Attack Protection**.
+6. **Email settings**: set the minimum password length to 8. The built-in mailer only sends a few emails per hour, so add custom SMTP before real users sign up, or turn "Confirm email" off while testing alone.
+7. **Check**: run `npm run check:setup`, then restart `npm run dev`.
 
 ## Deploy to Render
 
-The app is one long-running Node server: scans run in the background inside it. So it needs an always-on host like Render, not a serverless platform.
+Scans run in the background inside the server, so the app needs an always-on host, not serverless. `render.yaml` describes the whole service.
 
-1. **Push the repo** to GitHub or GitLab. `.env.local` is git-ignored and must never be committed.
-2. **Create the service**: in Render choose **New → Blueprint**, pick the repo, and Render reads `render.yaml`. It sets up:
-   - a 512 MB web service
-   - the build and start commands and the `/api/health` check
-   - one instance
-   - a 120-second shutdown window during deploys
-3. **Fill in the secrets** Render asks for:
-   - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`
-   - `KEYS_ENCRYPTION_SECRET`: use **the same value as your `.env.local`** so keys saved during testing keep working. Keep a backup of it somewhere safe.
-   - `NEXT_PUBLIC_SITE_URL`: your Render URL, e.g. `https://find-your-client.onrender.com`
-   - `OSM_CONTACT_EMAIL`: your email, required by OpenStreetMap's usage policy
-4. **Point Supabase at the live site**: under **Authentication → URL Configuration**, set **Site URL** to your Render URL and add `https://<your-app>.onrender.com/**` to **Redirect URLs**. Keep `http://localhost:3000/**` there for local development.
-5. **Check it**: open `https://<your-app>.onrender.com/api/health`. It should return `{"ok":true}`. Then sign up and run a small scan.
+1. Push the repo to GitHub. `.env.local` is git-ignored.
+2. In Render choose **New → Blueprint** and pick the repo. It creates:
+   - a 512 MB service with the build and start commands
+   - the `/api/health` check
+   - a single instance
+   - a 120 s shutdown window for safe redeploys
+3. Fill in the secrets:
+   - the three Supabase values
+   - `KEYS_ENCRYPTION_SECRET`: use the same value as `.env.local`
+   - `NEXT_PUBLIC_SITE_URL` and `OSM_CONTACT_EMAIL`
+4. In Supabase, add `https://<your-app>.onrender.com` as the Site URL and `https://<your-app>.onrender.com/**` as a Redirect URL.
+5. Open `/api/health`: it should return `{"ok":true}`.
 
-Notes:
-- **Region**: set `region` in `render.yaml` to the one closest to your Supabase project before the first deploy. It can't be changed later.
-- **`NEXT_PUBLIC_*` variables** are baked in at build time. After changing one, trigger a new deploy.
-- **Don't use the free plan for real users.** It sleeps after 15 idle minutes, which pauses running scans until the next visit (they resume then) and makes the first page load slow.
-- **Scaling up**: if many people scan at once, switch `plan` to `1c-2g` and raise `ANALYSIS_CONCURRENCY`. Keep `numInstances: 1`. Running several instances needs the separate-worker setup described in earlier notes.
+**Sizing**: measured at ~160 MB idle and ~340 MB with two 25-business scans running at once, using the settings in `render.yaml`. Builds run on Render's 8 GB build machines. Choose the region closest to your Supabase project before the first deploy. Switch to `1c-2g` if many users scan at the same time. Avoid the free plan: it sleeps when idle, which pauses scans.
 
-## Accounts & data
-
-- **Auth**: Supabase email + password, with signup, login, forgot/reset password and sign out. `src/proxy.ts` refreshes the session on every page request and sends signed-out visitors to `/login`.
-- **Schema** (`supabase/migrations/`):
-  - `profiles` has one row per user, created by a trigger on signup.
-  - `scans` holds each search.
-  - `businesses` holds everything learned about each business.
-  - `scan_events` is the activity feed.
-  - `scan_overview` is a view with progress counters.
-- **Security**:
-  - Every table has row-level security, and users can only read their own rows.
-  - Users can create and delete their own scans but can't modify results. The background worker writes those using the secret key, and API routes check ownership before triggering it.
-  - Child rows inherit their owner from the parent scan through a database trigger.
-
-## How a scan works
-
-1. **Geocode**: Nominatim turns "Koramangala, Bengaluru" into coordinates, a country and a currency.
-2. **Discover**: Overpass (OpenStreetMap) lists named businesses in ~30 categories within the radius. Chain outlets are skipped by default because their marketing is decided at head office. The selection is spread round-robin across categories and favours businesses you can actually contact.
-3. **Crawl**: the homepage plus up to 4 key pages (menu, booking, contact…) are checked for HTTPS, mobile viewport, speed, SEO metadata, schema.org, tech stack, analytics, booking and ordering tools, e-commerce, chat widgets, social links, contact details and copyright year.
-4. **Enrich** (optional): the business is matched on the user's Google Places or Yelp account.
-5. **Score**: the built-in engine (`src/lib/heuristics.ts`) produces a full report. It covers revenue range, six scores, gaps, customer segments, services with local pricing and acceptance probability, talking points, objections and an outreach draft.
-6. **Research + brief** (with the user's AI key): the chosen model researches the business on the web, then writes a structured brief, using the engine's numbers as a starting point.
-
-Scans run in the background on the server and their state is kept in Supabase. If the server restarts, an interrupted scan picks up where it stopped. Because the worker runs inside the Node server, deploy to a long-running host (a VPS, Railway, Render, Fly.io). On serverless platforms, background work gets cut off.
-
-### Analysis depth (per scan)
-
-- **Deep research**: web research + AI brief. Slowest and most accurate, roughly $0.30–0.60 per business.
-- **AI brief**: AI brief from crawl and map data only, roughly $0.08–0.15 per business.
-- **Engine only**: free and fast.
-
-## Stack
-
-Next.js 16 (App Router), React 19, React Three Fiber + drei + postprocessing for the 3D scenes, Framer Motion, Tailwind CSS 4, Supabase (Postgres + Auth), cheerio, and the Anthropic TypeScript SDK.
+## Project structure
 
 ```
 src/
-  app/                 pages + API routes
-  components/three/    HeroScene (globe), Constellation (3D lead map), ScoreOrb
+  app/                    pages, loading skeletons and API routes
+    (auth)/               login, signup, forgot/reset password
+    api/                  scans, businesses, profile, account (unlock, keys, models, settings, claim-guest), health
+  components/
+    three/                HeroScene (globe), Constellation (3D lead map), ScoreOrb
+    auth/, profile/       auth forms, key vault, profile form
   lib/
-    categories.ts      category knowledge base + service catalogue
-    market.ts          country purchasing-power scaling and currency
-    discovery.ts       Nominatim + Overpass
-    crawler.ts         website audit
-    heuristics.ts      scoring engine + report builder
-    ai.ts              research + brief, provider-agnostic
-    llm/               Anthropic, OpenAI-compatible and Gemini clients + JSON validation
-    providers/         provider catalog + HTTP/error handling
-    keys.ts, crypto.ts encrypted per-user API keys and settings
-    places.ts          Google Places + Yelp
-    search.ts          Tavily, Brave, Serper
-    pipeline.ts        background job runner
-    db.ts              Supabase data access
-    supabase/          browser, server (per-user) and admin clients
-  proxy.ts             session refresh + route protection
-supabase/
-  migrations/          database schema, RLS policies, triggers
+    discovery.ts          Nominatim + Overpass
+    crawler.ts            website audit
+    categories.ts         category knowledge base + service catalogue
+    market.ts             purchasing-power scaling + currency
+    heuristics.ts         scoring engine + report builder
+    insights.ts           verdict, key insights, website checklist
+    ai.ts                 research + brief (provider-agnostic)
+    llm/                  Anthropic, OpenAI-compatible and Gemini clients + JSON validation
+    places.ts, search.ts  Google Places / Yelp, Tavily / Brave / Serper
+    keys.ts, crypto.ts    encrypted per-user keys and settings
+    pipeline.ts           background job runner
+    db.ts, supabase/      data access + browser, server and admin clients
+  proxy.ts                session refresh + route protection
+supabase/migrations/      schema, RLS policies, triggers, guest functions
+scripts/check-setup.mjs   environment and database checker
+render.yaml               Render blueprint
 ```
 
-## Caveats
+## Limitations
 
-- Revenue and prices are estimates built from category baselines, size signals and coarse per-country purchasing-power factors. Treat them as a guide and check before quoting.
-- Social follower counts aren't scraped. Channels show as "active" when linked, and "strong" only when the AI research found evidence.
-- Public Overpass servers are sometimes overloaded. Discovery retries across mirrors, and a failed scan can be retried from its page.
-- Users pay their own providers directly. The AI-cost estimates shown in the app are rough and depend on the provider and model they pick.
+- **Revenue and prices are estimates** built from category baselines, size signals and coarse purchasing-power factors. Use them as a guide, not a quote.
+- **Social follower counts aren't scraped.** Channels show as "active" when linked, and "strong" only when AI research found evidence.
+- **OpenStreetMap coverage varies by area.** Websites and phone numbers are often missing, especially outside Europe and North America. Deep research and a ratings key fill most of those gaps.
+- **One server instance.** The worker runs inside it. Scaling to several instances would need a separate queue-based worker.
 
 Map data © OpenStreetMap contributors (ODbL).
