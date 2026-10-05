@@ -128,6 +128,8 @@ export interface IntegrationsView {
 
 /** What the rest of the app may know about a user's setup (no secrets). */
 export interface CapabilityStatus {
+  /** Signed in as a temporary guest (anonymous) user. */
+  guest?: boolean;
   ai: { provider: LlmProvider; providerName: string; model: string } | null;
   places: { provider: PlacesProvider; providerName: string } | null;
   research: { via: "native" | SearchProvider; name: string } | null;

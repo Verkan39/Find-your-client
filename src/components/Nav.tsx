@@ -11,6 +11,7 @@ import { Magnetic } from "./PointerFX";
 export interface NavUser {
   email: string;
   name: string | null;
+  isGuest?: boolean;
 }
 
 export function Nav({ user }: { user: NavUser | null }) {
@@ -56,7 +57,19 @@ export function Nav({ user }: { user: NavUser | null }) {
               </Link>
             );
           })}
-          {user ? (
+          {user?.isGuest ? (
+            <>
+              <span className="ml-1 hidden rounded-full bg-amber/10 px-2.5 py-1 text-[11px] font-medium text-amber ring-1 ring-amber/25 sm:inline">Guest</span>
+              <Link href="/login" className={clsx("rounded-full px-3 py-1.5 text-sm transition-colors", path === "/login" ? "text-fg" : "text-fg-muted hover:text-fg")}>
+                Log in
+              </Link>
+              <Magnetic className="ml-1" strength={0.25}>
+                <Link href="/signup" className="block rounded-full bg-fg px-4 py-1.5 text-sm font-medium text-ink-950 transition hover:bg-white">
+                  Save results
+                </Link>
+              </Magnetic>
+            </>
+          ) : user ? (
             <>
               <Magnetic className="ml-2 hidden sm:block" strength={0.25}>
                 <Link href="/dashboard#new-scan" className="block rounded-full bg-fg px-4 py-1.5 text-sm font-medium text-ink-950 transition hover:bg-white">

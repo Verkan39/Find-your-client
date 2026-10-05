@@ -81,7 +81,8 @@ function toBusiness(r: Row): Business {
 
 /* ----------------------------- scans ----------------------------- */
 
-export async function createScan(db: DB, input: {
+/** Scans are created by the server (admin client) after the API route has validated limits. */
+export async function createScan(db: DB, userId: string, input: {
   query: string;
   radiusM: number;
   categories: string[];
@@ -93,6 +94,7 @@ export async function createScan(db: DB, input: {
     await db
       .from("scans")
       .insert({
+        user_id: userId,
         query: input.query,
         radius_m: input.radiusM,
         categories: input.categories,

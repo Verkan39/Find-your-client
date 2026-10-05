@@ -23,11 +23,22 @@ export function LoginForm({ next }: { next: string }) {
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const { error } = await createClient().auth.signInWithPassword({ email: email.trim(), password });
+    const sb = createClient();
+    // If they were exploring as a guest, remember that session so its scans can move over.
+    const { data: before } = await sb.auth.getSession();
+    const guestToken = before.session?.user.is_anonymous ? before.session.access_token : null;
+    const { error } = await sb.auth.signInWithPassword({ email: email.trim(), password });
     if (error) {
       setError(friendlyAuthError(error.message));
       setBusy(false);
       return;
+    }
+    if (guestToken) {
+      await fetch("/api/account/claim-guest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: guestToken }),
+      }).catch(() => {});
     }
     router.replace(next);
     router.refresh();
@@ -46,7 +57,7 @@ export function LoginForm({ next }: { next: string }) {
   );
 }
 
-export function SignupForm({ next }: { next: string }) {
+export function SignupForm({ next, guest = false }: { next: string; guest?: boolean }) {
   const router = useRouter();
   const [step, setStep] = useState<1 | 2>(1);
   const [name, setName] = useState("");
@@ -106,6 +117,7 @@ export function SignupForm({ next }: { next: string }) {
     setAboutErrors({});
     setBusy(true);
     setError(null);
+    if (guest) return upgradeGuest(withAbout);
     const { data, error } = await createClient().auth.signUp({
       email: email.trim(),
       password,
@@ -127,17 +139,64 @@ export function SignupForm({ next }: { next: string }) {
     }
   }
 
+  /**
+   * A guest is already a (temporary) user: attach an email and password to that
+   * same account instead of creating a new one, so every scan stays with them.
+   */
+  async function upgradeGuest(withAbout: boolean) {
+    const sb = createClient();
+    // Their profile row exists already (created with the guest session).
+    await fetch("/api/profile", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(withAbout ? { fullName: name, ...about } : { ...EMPTY_ABOUT, fullName: name }),
+    }).catch(() => {});
+
+    const { data, error } = await sb.auth.updateUser(
+      { email: email.trim(), data: { full_name: name.trim() } },
+      { emailRedirectTo: callbackUrl("/reset-password?welcome=1") },
+    );
+    if (error) {
+      setBusy(false);
+      setError(friendlyAuthError(error.message));
+      setStep(1);
+      return;
+    }
+    if (data.user?.email?.toLowerCase() === email.trim().toLowerCase()) {
+      // Email confirmation is off: the account is permanent now; set the password.
+      const { error: pwError } = await sb.auth.updateUser({ password });
+      setBusy(false);
+      if (pwError) return setError(friendlyAuthError(pwError.message));
+      router.replace(next);
+      router.refresh();
+      return;
+    }
+    // Confirmation is on: the password is chosen after they click the link.
+    setBusy(false);
+    setSentTo(email.trim());
+  }
+
   if (sentTo) {
     return (
       <Notice tone="success">
         <p className="font-medium">Check your inbox</p>
-        <p className="mt-1 text-fg-muted">We sent a confirmation link to <span className="text-fg">{sentTo}</span>. Click it to activate your account, then you'll land on your dashboard.</p>
+        {guest ? (
+          <p className="mt-1 text-fg-muted">We sent a link to <span className="text-fg">{sentTo}</span>. Click it to confirm your email, then choose a password. Your guest scans are saved to the account automatically.</p>
+        ) : (
+          <p className="mt-1 text-fg-muted">We sent a confirmation link to <span className="text-fg">{sentTo}</span>. Click it to activate your account, then you'll land on your dashboard.</p>
+        )}
       </Notice>
     );
   }
 
   return (
     <div>
+      {guest && (
+        <div className="mb-5 flex gap-2.5 rounded-xl bg-lime/[0.07] px-3.5 py-3 text-sm text-fg-muted ring-1 ring-lime/20">
+          <Check className="mt-0.5 size-4 shrink-0 text-lime" />
+          <span>Everything you ran as a guest will be saved to your new account.</span>
+        </div>
+      )}
       <ol className="mb-6 flex items-center gap-2 text-xs" aria-label="Signup steps">
         {["Account", "About you"].map((label, i) => {
           const n = (i + 1) as 1 | 2;

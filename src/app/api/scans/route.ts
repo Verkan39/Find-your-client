@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { authed } from "@/lib/api";
+import { GUEST_LIMITS, authed, isGuest } from "@/lib/api";
 import { CATEGORY_BY_KEY } from "@/lib/categories";
 import { businessesRequestedToday, createScan, listScans } from "@/lib/db";
 import { capabilityStatus } from "@/lib/keys";
 import { enqueueScan, resumeAll } from "@/lib/pipeline";
+import { admin } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +37,15 @@ export async function POST(req: Request) {
   }
   const b = parsed.data;
 
+  // Guests can try everything the free engine does, within tighter limits.
+  const guest = isGuest(user);
+  if (guest && b.aiMode !== "off") {
+    return NextResponse.json({ error: "AI analysis needs an account: sign up, then connect your own AI provider." }, { status: 403 });
+  }
+  if (guest && b.maxBusinesses > GUEST_LIMITS.maxPerScan) {
+    return NextResponse.json({ error: `Guests can analyse up to ${GUEST_LIMITS.maxPerScan} businesses per scan. Sign up for bigger scans.` }, { status: 403 });
+  }
+
   // AI work runs on the user's own keys, so check they've set them up.
   const caps = await capabilityStatus(user.id);
   if (b.aiMode !== "off" && !caps.ai) {
@@ -46,16 +56,18 @@ export async function POST(req: Request) {
   }
 
   const used = await businessesRequestedToday(supabase);
-  const limit = dailyLimit();
+  const limit = guest ? GUEST_LIMITS.perDay() : dailyLimit();
   if (used + b.maxBusinesses > limit) {
     const left = Math.max(0, limit - used);
     return NextResponse.json(
-      { error: left ? `Daily limit: you can analyse ${left} more business${left === 1 ? "" : "es"} today. Lower the count or try tomorrow.` : "You've reached today's analysis limit. Try again tomorrow." },
+      { error: left
+          ? `Daily limit: you can analyse ${left} more business${left === 1 ? "" : "es"} today. Lower the count or try tomorrow.`
+          : guest ? "You've used today's guest allowance. Sign up to keep scanning." : "You've reached today's analysis limit. Try again tomorrow." },
       { status: 429 },
     );
   }
 
-  const scan = await createScan(supabase, {
+  const scan = await createScan(admin(), user.id, {
     query: b.query,
     radiusM: Math.round(b.radiusKm * 1000),
     categories: b.categories.filter((c) => CATEGORY_BY_KEY[c]),

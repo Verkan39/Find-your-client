@@ -48,12 +48,41 @@ Users open **Profile → API keys & providers**, re-enter their password, and co
   - Every provider's output is validated against the report schema, with one automatic repair round if it doesn't match.
 - **Research without built-in search**: providers that can't search by themselves get research through the user's search key. The app runs targeted searches, reads the top pages, and the model writes notes from that evidence.
 
-## Hosted Supabase (production)
+## Hosted Supabase
 
-1. Create a project at https://supabase.com/dashboard.
-2. Apply the schema: either run `npx supabase link --project-ref <ref>` and then `npm run db:push`, or paste `supabase/migrations/*.sql` into the dashboard's SQL editor.
-3. Under **Authentication → URL Configuration**, set **Site URL** to your app's URL and add `https://<your-domain>/auth/callback` to **Redirect URLs**.
-4. Under **Project Settings → API Keys**, copy the URL, publishable key and secret key into your environment.
+1. **Create a project** at https://supabase.com/dashboard.
+2. **Copy the keys** from **Project Settings → API Keys** into `.env.local`:
+   - Project URL → `NEXT_PUBLIC_SUPABASE_URL`
+   - Publishable key (`sb_publishable_…`) → `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+   - Secret key (`sb_secret_…`) → `SUPABASE_SECRET_KEY`
+
+   Projects that only show the legacy `anon` / `service_role` keys work too: put them in `NEXT_PUBLIC_SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY`.
+3. **Create the tables**: apply everything in `supabase/migrations/`, oldest first. Either:
+   ```bash
+   npx supabase login
+   npm run db:link -- --project-ref <your-project-ref>   # ref is in the dashboard URL
+   npm run db:push
+   ```
+   or paste each `.sql` file, in filename order, into **SQL Editor** and run it.
+4. **Configure auth** under **Authentication → URL Configuration**:
+   - Site URL: `http://localhost:3000` for development, or your live domain.
+   - Redirect URLs: add `http://localhost:3000/**`, plus `https://<your-domain>/**` when you deploy.
+5. **Turn on guest mode**: in **Authentication → Sign In / Providers**, enable **Allow anonymous sign-ins**. This powers "Try it free". To keep bots from making guest accounts in bulk, also enable CAPTCHA protection under **Authentication → Attack Protection** before launch.
+6. **Recommended auth settings** under **Authentication → Sign In / Providers → Email**:
+   - Set the minimum password length to 8, to match the signup form.
+   - "Confirm email" is on by default. Supabase's built-in mailer only sends a few emails per hour, so add custom SMTP (**Authentication → Emails → SMTP**) before real users sign up. For solo testing you can turn confirmation off.
+7. **Check everything**: run `npm run check:setup`. It tests the connection, both keys, every table, the permissions and the encryption secret, and tells you what to fix. Then restart `npm run dev`.
+
+The local Docker stack (`npm run db:start`) is only for offline development. Data doesn't move between local and hosted, so the hosted project starts empty and you sign up again there.
+
+## Guest mode
+
+"Try it free" (`/try`) starts a Supabase **anonymous** session, so visitors can use the app without signing up:
+
+- **What guests can do**: engine-only scans, up to 10 businesses per scan and 30 per day (`GUEST_DAILY_BUSINESS_LIMIT`). AI analysis and API keys need an account. A floating bar reminds guests that their results are temporary.
+- **Signing up** turns the guest into a permanent account in place (same user ID), so every scan is kept. With email confirmation on, they confirm the email first and then choose a password.
+- **Logging in** to an existing account moves the guest's scans into that account. `/api/account/claim-guest` verifies the guest session, then calls `transfer_guest_data()`.
+- **Clean-up**: guests older than `GUEST_RETENTION_HOURS` (default 24) are deleted hourly by the server (`cleanup_guests()`), and their scans go with them.
 
 ## Accounts & data
 

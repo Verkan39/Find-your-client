@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, Space_Grotesk } from "next/font/google";
 import { Nav, type NavUser } from "@/components/Nav";
+import { GuestBar } from "@/components/GuestBar";
 import { PointerFX } from "@/components/PointerFX";
 import { getUser } from "@/lib/supabase/server";
 import "./globals.css";
@@ -18,7 +19,11 @@ async function currentUser(): Promise<NavUser | null> {
   try {
     const { user } = await getUser();
     if (!user) return null;
-    return { email: user.email ?? "", name: (user.user_metadata?.full_name as string | undefined) || null };
+    return {
+      email: user.email ?? "",
+      name: (user.user_metadata?.full_name as string | undefined) || null,
+      isGuest: Boolean(user.is_anonymous),
+    };
   } catch {
     return null; // Supabase not configured yet; render signed-out
   }
@@ -32,6 +37,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <PointerFX />
         <Nav user={user} />
         {children}
+        {user?.isGuest && <GuestBar />}
       </body>
     </html>
   );

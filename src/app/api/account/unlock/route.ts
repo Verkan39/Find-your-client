@@ -26,7 +26,9 @@ export async function GET() {
 export async function POST(req: Request) {
   const { user, denied } = await authed();
   if (denied) return denied;
-  if (!user.email) return NextResponse.json({ error: "This account has no password." }, { status: 400 });
+  if (!user.email || user.is_anonymous) {
+    return NextResponse.json({ error: "Create an account to connect API keys." }, { status: 403 });
+  }
 
   const now = Date.now();
   const a = attempts.get(user.id);

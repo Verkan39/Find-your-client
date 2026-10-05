@@ -4,7 +4,7 @@ import { api } from "@/lib/fetcher";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, ArrowUpRight, CheckCircle2, KeyRound, MapPinned, Radar, Search, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, CheckCircle2, KeyRound, MapPinned, Radar, Search, Sparkles, Trash2 } from "lucide-react";
 import { NewScanForm } from "@/components/NewScanForm";
 import { ScanListSkeleton, Skel } from "@/components/skeletons";
 import { Pill, Reveal, STAGE_LABEL, Spinner, TierBadge, timeAgo } from "@/components/ui";
@@ -44,7 +44,8 @@ export default function Dashboard() {
           {!status && (
             <div className="flex gap-2"><Skel className="h-6 w-36 rounded-full" /><Skel className="h-6 w-36 rounded-full" /></div>
           )}
-          {status && (
+          {status?.guest && <Pill tone="warn">Guest session · engine only</Pill>}
+          {status && !status.guest && (
             <div className="flex flex-wrap gap-2">
               <Pill tone={status.ai ? "good" : "warn"}>
                 {status.ai ? <CheckCircle2 className="size-3" /> : <AlertTriangle className="size-3" />}
@@ -63,7 +64,21 @@ export default function Dashboard() {
         </div>
       </Reveal>
 
-      {status && (!status.ai || !status.places) && (
+      {status?.guest && (
+        <Reveal delay={0.05}>
+          <div className="mt-6 flex flex-wrap items-center gap-3 rounded-2xl bg-violet/[0.08] p-4 text-sm ring-1 ring-violet/25">
+            <Sparkles className="size-4 shrink-0 text-violet" />
+            <p className="min-w-0 flex-1 text-fg-muted">
+              <span className="text-fg">You're trying Find Your Client as a guest.</span> Scans use the free engine (up to 10 businesses each) and are deleted after 24 hours. Sign up to keep them and to connect your own AI.
+            </p>
+            <Link href="/signup" className="shrink-0 rounded-full bg-fg px-4 py-1.5 text-xs font-medium text-ink-950 transition hover:bg-white">
+              Sign up free
+            </Link>
+          </div>
+        </Reveal>
+      )}
+
+      {status && !status.guest && (!status.ai || !status.places) && (
         <Reveal delay={0.05}>
           <div className="mt-6 flex flex-wrap items-center gap-3 rounded-2xl bg-amber/[0.06] p-4 text-sm ring-1 ring-amber/20">
             <KeyRound className="size-4 shrink-0 text-amber" />

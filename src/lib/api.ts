@@ -27,3 +27,12 @@ export async function unlocked(): Promise<Authed> {
 }
 
 export const badRequest = (error: string) => NextResponse.json({ error }, { status: 400 });
+
+/** Guests are Supabase anonymous users: real sessions, no email or password yet. */
+export const isGuest = (user: { is_anonymous?: boolean }) => Boolean(user.is_anonymous);
+
+export const GUEST_LIMITS = {
+  maxPerScan: 10,
+  perDay: () => Math.max(1, Number(process.env.GUEST_DAILY_BUSINESS_LIMIT) || 30),
+  retentionHours: () => Math.max(1, Number(process.env.GUEST_RETENTION_HOURS) || 24),
+};

@@ -1,10 +1,11 @@
 "use client";
 
 import { api } from "@/lib/fetcher";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowRight, Bot, Check, Layers, MapPin, Zap } from "lucide-react";
+import { ArrowRight, Bot, Check, Layers, Lock, MapPin, Zap } from "lucide-react";
 import clsx from "clsx";
 import { CATEGORIES, GROUPS } from "@/lib/categories";
 import type { AiMode, SystemStatus } from "@/lib/types";
@@ -12,6 +13,7 @@ import { Magnetic } from "./PointerFX";
 import { Spinner } from "./ui";
 
 const SIZES = [10, 25, 50, 100];
+const GUEST_MAX = 10;
 
 const AI_MODES: { key: AiMode; label: string; desc: string; icon: typeof Bot }[] = [
   { key: "deep", label: "Deep research", desc: "Searches the web for each business, then writes the brief. Slowest, most accurate.", icon: Bot },
@@ -22,6 +24,7 @@ const AI_MODES: { key: AiMode; label: string; desc: string; icon: typeof Bot }[]
 /** Why a mode can't be used with the user's current setup, if it can't. */
 function blocked(mode: AiMode, status: SystemStatus | null): string | null {
   if (!status || mode === "off") return null;
+  if (status.guest) return "Sign up to use AI";
   if (!status.ai) return "Add an AI key on your Profile";
   if (mode === "deep" && !status.research) return "Add a web search key on your Profile";
   return null;
@@ -32,6 +35,8 @@ export function NewScanForm({ status }: { status: SystemStatus | null }) {
   const [query, setQuery] = useState("");
   const [radiusKm, setRadiusKm] = useState(1.5);
   const [max, setMax] = useState(25);
+  const guest = Boolean(status?.guest);
+  const effectiveMax = guest ? Math.min(max, GUEST_MAX) : max;
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [includeChains, setIncludeChains] = useState(false);
   const [aiMode, setAiMode] = useState<AiMode>("deep");
@@ -65,7 +70,7 @@ export function NewScanForm({ status }: { status: SystemStatus | null }) {
       const res = await api("/api/scans", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query, radiusKm, categories: [...selected], maxBusinesses: max, includeChains, aiMode: effectiveMode }),
+        body: JSON.stringify({ query, radiusKm, categories: [...selected], maxBusinesses: effectiveMax, includeChains, aiMode: effectiveMode }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to start scan");
@@ -108,12 +113,18 @@ export function NewScanForm({ status }: { status: SystemStatus | null }) {
         <div>
           <div className="mb-2 text-sm text-fg-muted">Businesses to analyse in depth</div>
           <div className="flex gap-2">
-            {SIZES.map((n) => (
-              <button type="button" key={n} onClick={() => setMax(n)} className={clsx("flex-1 rounded-xl py-2 text-sm font-medium ring-1 transition", max === n ? "bg-fg text-ink-950 ring-fg" : "bg-white/[0.03] text-fg-muted ring-white/10 hover:text-fg")}>
-                {n}
-              </button>
-            ))}
+            {SIZES.map((n) => {
+              const locked = guest && n > GUEST_MAX;
+              return (
+                <button type="button" key={n} disabled={locked} onClick={() => setMax(n)} title={locked ? "Sign up for bigger scans" : undefined}
+                  className={clsx("inline-flex flex-1 items-center justify-center gap-1 rounded-xl py-2 text-sm font-medium ring-1 transition disabled:cursor-not-allowed disabled:opacity-40",
+                    effectiveMax === n ? "bg-fg text-ink-950 ring-fg" : "bg-white/[0.03] text-fg-muted ring-white/10 hover:text-fg")}>
+                  {locked && <Lock className="size-3" />}{n}
+                </button>
+              );
+            })}
           </div>
+          {guest && <p className="mt-2 text-xs text-fg-faint">Guests can analyse up to {GUEST_MAX} businesses per scan. <Link href="/signup" className="text-violet hover:underline">Sign up</Link> for more.</p>}
         </div>
       </div>
 

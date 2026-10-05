@@ -34,6 +34,8 @@ export async function proxy(request: NextRequest) {
   // getClaims validates the JWT (and refreshes it if needed) — never trust getSession here.
   const { data } = await supabase.auth.getClaims();
   const signedIn = Boolean(data?.claims?.sub);
+  // Guests (anonymous sessions) may use the app, but still need login/signup.
+  const fullAccount = signedIn && !data?.claims?.is_anonymous;
   const { pathname, search } = request.nextUrl;
 
   const redirect = (to: URL) => {
@@ -47,7 +49,7 @@ export async function proxy(request: NextRequest) {
     url.searchParams.set("next", pathname + search);
     return redirect(url);
   }
-  if (signedIn && matches(pathname, GUEST_ONLY)) {
+  if (fullAccount && matches(pathname, GUEST_ONLY)) {
     return redirect(new URL(safeNext(request.nextUrl.searchParams.get("next")), request.url));
   }
   return response;

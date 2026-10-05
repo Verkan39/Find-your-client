@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { authed } from "@/lib/api";
+import { authed, isGuest } from "@/lib/api";
 import { capabilityStatus } from "@/lib/keys";
 
 export const dynamic = "force-dynamic";
@@ -8,5 +8,5 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const { user, denied } = await authed();
   if (denied) return denied;
-  return NextResponse.json(await capabilityStatus(user.id));
+  return NextResponse.json({ ...(await capabilityStatus(user.id)), guest: isGuest(user) });
 }

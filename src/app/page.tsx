@@ -89,9 +89,9 @@ export default function Home() {
 
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.9 }} className="pointer-events-auto mt-10 flex flex-wrap items-center gap-3">
             <Magnetic strength={0.35}>
-              <Link href="/dashboard#new-scan" className="group relative inline-flex items-center gap-2 overflow-hidden rounded-full bg-fg px-6 py-3 font-medium text-ink-950 transition">
+              <Link href="/try" className="group relative inline-flex items-center gap-2 overflow-hidden rounded-full bg-fg px-6 py-3 font-medium text-ink-950 transition">
                 <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-violet/30 to-transparent transition-transform duration-700 group-hover:translate-x-full" />
-                Start scanning
+                Try it free
                 <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
               </Link>
             </Magnetic>
@@ -255,10 +255,10 @@ export default function Home() {
             <div className="relative">
               <Sparkles className="mx-auto size-8 text-violet" />
               <h2 className="mx-auto mt-4 max-w-2xl font-display text-4xl font-semibold tracking-tight sm:text-5xl">Your next client is a few streets away.</h2>
-              <p className="mx-auto mt-4 max-w-lg text-fg-muted">Run your first scan in under a minute. Works without any API keys, and gets much deeper with them.</p>
+              <p className="mx-auto mt-4 max-w-lg text-fg-muted">Run your first scan in under a minute, no account needed. Sign up when you want to keep your results.</p>
               <Magnetic className="mt-8 inline-block">
-                <Link href="/dashboard#new-scan" className="inline-flex items-center gap-2 rounded-full bg-fg px-6 py-3 font-medium text-ink-950 transition hover:bg-white">
-                  <Building2 className="size-4" /> Scan a neighbourhood
+                <Link href="/try" className="inline-flex items-center gap-2 rounded-full bg-fg px-6 py-3 font-medium text-ink-950 transition hover:bg-white">
+                  <Building2 className="size-4" /> Try it free, no signup
                 </Link>
               </Magnetic>
             </div>
