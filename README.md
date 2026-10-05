@@ -84,6 +84,30 @@ The local Docker stack (`npm run db:start`) is only for offline development. Dat
 - **Logging in** to an existing account moves the guest's scans into that account. `/api/account/claim-guest` verifies the guest session, then calls `transfer_guest_data()`.
 - **Clean-up**: guests older than `GUEST_RETENTION_HOURS` (default 24) are deleted hourly by the server (`cleanup_guests()`), and their scans go with them.
 
+## Deploy to Render
+
+The app is one long-running Node server: scans run in the background inside it. So it needs an always-on host like Render, not a serverless platform.
+
+1. **Push the repo** to GitHub or GitLab. `.env.local` is git-ignored and must never be committed.
+2. **Create the service**: in Render choose **New → Blueprint**, pick the repo, and Render reads `render.yaml`. It sets up:
+   - a 512 MB web service
+   - the build and start commands and the `/api/health` check
+   - one instance
+   - a 120-second shutdown window during deploys
+3. **Fill in the secrets** Render asks for:
+   - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`
+   - `KEYS_ENCRYPTION_SECRET`: use **the same value as your `.env.local`** so keys saved during testing keep working. Keep a backup of it somewhere safe.
+   - `NEXT_PUBLIC_SITE_URL`: your Render URL, e.g. `https://find-your-client.onrender.com`
+   - `OSM_CONTACT_EMAIL`: your email, required by OpenStreetMap's usage policy
+4. **Point Supabase at the live site**: under **Authentication → URL Configuration**, set **Site URL** to your Render URL and add `https://<your-app>.onrender.com/**` to **Redirect URLs**. Keep `http://localhost:3000/**` there for local development.
+5. **Check it**: open `https://<your-app>.onrender.com/api/health`. It should return `{"ok":true}`. Then sign up and run a small scan.
+
+Notes:
+- **Region**: set `region` in `render.yaml` to the one closest to your Supabase project before the first deploy. It can't be changed later.
+- **`NEXT_PUBLIC_*` variables** are baked in at build time. After changing one, trigger a new deploy.
+- **Don't use the free plan for real users.** It sleeps after 15 idle minutes, which pauses running scans until the next visit (they resume then) and makes the first page load slow.
+- **Scaling up**: if many people scan at once, switch `plan` to `1c-2g` and raise `ANALYSIS_CONCURRENCY`. Keep `numInstances: 1`. Running several instances needs the separate-worker setup described in earlier notes.
+
 ## Accounts & data
 
 - **Auth**: Supabase email + password, with signup, login, forgot/reset password and sign out. `src/proxy.ts` refreshes the session on every page request and sends signed-out visitors to `/login`.

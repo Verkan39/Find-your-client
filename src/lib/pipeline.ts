@@ -16,13 +16,29 @@ import type { Business, Scan } from "./types";
  * server restarts. The worker uses the admin client because it acts on behalf of
  * whichever user owns the scan; API routes check ownership before enqueuing work.
  */
-const g = globalThis as unknown as { __fycRunning?: Set<string>; __fycResumed?: boolean };
+const g = globalThis as unknown as { __fycRunning?: Set<string>; __fycResumed?: boolean; __fycDraining?: boolean; __fycSigterm?: boolean };
 const running = (g.__fycRunning ??= new Set<string>());
+
+/*
+ * Zero-downtime deploys briefly run the old and new server side by side. On
+ * SIGTERM the old one stops taking new work and leaves unfinished scans as they
+ * are; the new one resumes them after a short delay, so a scan is never
+ * processed (and billed) twice.
+ */
+if (!g.__fycSigterm && typeof process !== "undefined" && process.once) {
+  g.__fycSigterm = true;
+  process.once("SIGTERM", () => {
+    g.__fycDraining = true;
+    console.log("[pipeline] SIGTERM: finishing in-flight businesses, leaving the rest for the next server");
+  });
+}
+const draining = () => Boolean(g.__fycDraining);
+const resumeDelayMs = () => Number(process.env.RESUME_DELAY_MS ?? (process.env.NODE_ENV === "production" ? 45_000 : 0));
 
 const concurrency = () => Math.max(1, Math.min(8, Number(process.env.ANALYSIS_CONCURRENCY) || 3));
 
 export function enqueueScan(id: string) {
-  if (running.has(id)) return;
+  if (running.has(id) || draining()) return; // a draining server leaves it queued for the next one
   running.add(id);
   runScan(id)
     .catch(async (e) => {
@@ -40,12 +56,14 @@ export function enqueueScan(id: string) {
 export function resumeAll() {
   if (g.__fycResumed) return;
   g.__fycResumed = true;
-  (async () => {
-    for (const s of await db.unfinishedScans(admin())) enqueueScan(s.id);
-  })().catch((e) => {
-    g.__fycResumed = false; // try again on the next request
-    console.warn(`[pipeline] couldn't resume scans: ${e instanceof Error ? e.message : e}`);
-  });
+  setTimeout(() => {
+    (async () => {
+      for (const s of await db.unfinishedScans(admin())) enqueueScan(s.id);
+    })().catch((e) => {
+      g.__fycResumed = false; // try again on the next request
+      console.warn(`[pipeline] couldn't resume scans: ${e instanceof Error ? e.message : e}`);
+    });
+  }, resumeDelayMs());
 }
 
 async function runScan(id: string) {
@@ -87,7 +105,7 @@ async function runScan(id: string) {
 
   const queue = await db.pendingBusinesses(sb, id);
   const workers = Array.from({ length: concurrency() }, async () => {
-    while (queue.length) {
+    while (queue.length && !draining()) {
       const b = queue.shift()!;
       const current = await db.getScan(sb, id);
       if (!current) return; // scan deleted mid-run
@@ -96,6 +114,8 @@ async function runScan(id: string) {
   });
   await Promise.all(workers);
 
+  // Shutting down: leave the scan unfinished so the next server picks it up.
+  if (draining() && queue.length) return;
   if (!(await db.getScan(sb, id))) return;
   const counts = await db.scanCounts(sb, id);
   await db.updateScan(sb, id, { status: "done" });
