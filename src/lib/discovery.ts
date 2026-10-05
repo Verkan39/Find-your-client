@@ -10,33 +10,7 @@ const OVERPASS = [
   "https://overpass.kumi.systems/api/interpreter",
 ];
 
-export interface GeoResult {
-  label: string;
-  lat: number;
-  lon: number;
-  countryCode: string | null;
-}
-
-export async function geocode(query: string): Promise<GeoResult> {
-  const url = new URL("https://nominatim.openstreetmap.org/search");
-  url.searchParams.set("q", query);
-  url.searchParams.set("format", "jsonv2");
-  url.searchParams.set("limit", "1");
-  url.searchParams.set("addressdetails", "1");
-  const res = await fetch(url, { headers: { "User-Agent": UA, "Accept-Language": "en" }, signal: AbortSignal.timeout(20_000) });
-  if (!res.ok) throw new Error(`Geocoding failed (HTTP ${res.status})`);
-  const data = (await res.json()) as {
-    display_name: string; lat: string; lon: string; address?: { country_code?: string };
-  }[];
-  if (!data.length) throw new Error(`Couldn't find a place called "${query}". Try adding the city or country.`);
-  const d = data[0];
-  return {
-    label: d.display_name.split(",").slice(0, 3).join(",").trim(),
-    lat: parseFloat(d.lat),
-    lon: parseFloat(d.lon),
-    countryCode: d.address?.country_code ?? null,
-  };
-}
+export { geocode, type GeoResult } from "./geocode";
 
 interface OsmElement {
   type: "node" | "way" | "relation";

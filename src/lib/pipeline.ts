@@ -74,7 +74,10 @@ async function runScan(id: string) {
   if (scan.lat == null || scan.lon == null) {
     await db.updateScan(sb, id, { status: "geocoding" });
     await db.logEvent(sb, id, `Locating "${scan.query}" on the map…`);
-    const geo = await geocode(scan.query);
+    // A user's own Google key is the last-resort geocoder if the free ones are busy.
+    const owner = await loadUserConfig(scan.userId).catch(() => null);
+    const googleKey = owner?.places?.provider === "google_places" ? owner.places.key : undefined;
+    const geo = await geocode(scan.query, { googleKey, onNote: (m) => void db.logEvent(sb, id, m, "warn") });
     await db.updateScan(sb, id, {
       label: geo.label, lat: geo.lat, lon: geo.lon,
       countryCode: geo.countryCode ?? "", currency: market(geo.countryCode).currency,
